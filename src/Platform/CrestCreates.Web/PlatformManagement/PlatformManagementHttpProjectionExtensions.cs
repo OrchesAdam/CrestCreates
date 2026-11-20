@@ -5,11 +5,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace CrestCreates.Web.PlatformManagement;
 
 /// <summary>
-/// Opt-in activation of the platform management HTTP surface (G-09). The generated activation is
-/// per-assembly: it lights up every projection anchor in CrestCreates.Web (including AuditRetention),
-/// idempotently. Hosts call this explicitly alongside AddCapabilityRuntime/AddCrestCapabilityEndpoints
-/// and MapCrestCapabilityEndpoints; it is intentionally not folded into AddCrestWeb defaults so the
-/// ExplicitHost surface stays opt-in and existing activation baselines are unchanged.
+/// Activates the generated platform management HTTP surface (G-09). Hosts call this alongside
+/// AddCapabilityRuntime, AddCrestCapabilityEndpoints, and MapCrestCapabilityEndpoints. Audit retention
+/// has its own activation through AddCrestAuditRetentionHttp.
 /// </summary>
 public static class PlatformManagementHttpProjectionExtensions
 {

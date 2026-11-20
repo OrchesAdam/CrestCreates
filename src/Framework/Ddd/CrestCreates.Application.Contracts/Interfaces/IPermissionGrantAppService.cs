@@ -36,4 +36,7 @@ public interface IPermissionGrantAppService
     [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "effective/{userId}", Kind = HttpProjectionOperationKind.Query,
         Permissions = new[] { PlatformHttpPermissions.PermissionGrants.Read })]
     Task<UserEffectivePermissionsDto> GetUserEffectivePermissionsAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default);
+
+    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "me", Kind = HttpProjectionOperationKind.Query)]
+    Task<UserEffectivePermissionsDto> GetMyEffectivePermissionsAsync(CancellationToken cancellationToken = default);
 }

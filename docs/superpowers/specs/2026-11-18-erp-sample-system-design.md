@@ -353,3 +353,22 @@ podman_compose` 模块方式运行，未改动用户环境。
 - **G-01** 菜单及当前用户权限缺少专用聚合 API。**G-02** Quartz 使用 RAMJobStore，任务重启后不保留。**G-03** FileManagement 仍为 experimental，内存元数据不持久。**G-04** 暂无 Notification 模块，以审批中心代替待办提醒。**G-05** 暂无 Excel 导入导出能力。
 - **G-06** 同名 DTO 用 `CCCG005` 诊断并跳过冲突生成。**G-07** 正式投影保留响应信封，枚举按字符串序列化。**G-08** OpenIddict 保持 HTTPS 要求，开发态可显式启用 HTTP。**G-09** 平台管理 HTTP 面已通过 ExplicitHost 补齐。**G-10** 种子数据可复用 `AuditPropertySetter`。
 - **P1/P2** 审批角色读取已改用 `ICurrentUser.Roles` 以兼容两种角色 claim。自定义 Outbox 契约需同时注册 `AddOutboxDeliveryHandler`。库存 kernel 写入仍未覆盖审计拦截器。RID publish 曾出现 OpenIddict 程序集不匹配，示例使用可移植 publish。已发送事件的 resend 返回 400，重发幂等语义待核。
+
+## 18. P4 可靠性与交付验收（2026-11-19）
+
+唯一出站主链：收货/MES/CRM 业务事实在业务 EF UoW 内经 `IErpOutboxAppender`（借用受管 Npgsql 事务，复用
+PG runtime `PostgreSqlTransactionalOutboxWriter` 的 SQL/完整性/冲突校验，固定同库异 schema）追加 Outbox；
+dispatcher 经正式 `AddRabbitMqEventBus`（generated descriptor + codec + 静态订阅）发布并等待 mandatory confirm，
+订阅在 ERP Inbox 提交后才 ACK。新出站消息 `RequiredConsumerIds=[]`；审批仍走本地 durable obligation。
+退役收货 `resend-stock-event` 与 `StockEventEmittedAt`（迁移删列），改 `{id}/delivery-status` 只读投影。
+Inbox 按 `(ConsumerId, MessageId)` 唯一键 + payload SHA256 判重/冲突，仅匹配唯一约束的 `DbUpdateException`
+才判 Duplicate。持久幂等：报工/结算/MES 用操作 ID + 请求指纹 + 可回放结果，同键同参回放、同键异参 409。
+库存：批内同键余额复用、流水审计字段、盘点服务端快照、首建竞争仅自然键唯一约束映射 409；
+`StockCountRepository.UpdateAsync` 修复客户端 Guid 主键新行被 EF 标 Modified 的缺陷。新增 `ErpHttpAuditSink`
+（单例 + 每写独立 scope）与 `GET /api/permission-grants/me`。
+交付：标准 Compose = PG + RabbitMQ + ERP（broker 必需、凭据环境注入、readiness 含订阅健康）；
+Playwright 真实 Chromium 三角色全链、重启保留、broker 停机续投用例。
+证据（JIT，linux-x64，真实 PG16 + RabbitMQ4，详见 memory.md 2026-11-19 条目）：ERP 单元 10/10、权限 22/22、
+审计/事务集成 14/14（quiet 10 连跑 + normal 13+ 连跑稳定）、PG outbox/迁移聚焦通过；全新 Compose 栈浏览器全链
+与重启保留通过；broker 停机时业务照常提交（readiness 503/Unhealthy），恢复后原 Outbox 记录自动续投
+（InFlight→Delivered）且 Inbox 仅一条、库存流水与结算明细不增。支持声明限已执行组合，不外推其他 ORM/RID/NativeAOT。

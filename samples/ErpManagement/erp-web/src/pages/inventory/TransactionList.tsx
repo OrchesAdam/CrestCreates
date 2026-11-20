@@ -22,7 +22,8 @@ export default function TransactionList() {
     { name: 'balanceAfter', label: '变动后余额', type: 'number', precision: 4, width: 120 },
     { name: 'movementType', label: '移动类型', type: 'select', options: movementTypeOptions, width: 100 },
     { name: 'sourceDocType', label: '来源单据类型', width: 140 },
-    { name: 'sourceDocId', label: '来源单据ID', hideInTable: true },
+    { name: 'sourceDocId', label: '来源单据 ID', width: 310 },
+    { name: 'sourceOperationId', label: '来源操作 ID', width: 310 },
   ];
 
   return <CrudPage title="库存流水" apiPrefix="/api/stock-transactions" fields={fields} readOnly />;

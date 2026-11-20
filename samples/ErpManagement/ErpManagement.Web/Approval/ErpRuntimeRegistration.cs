@@ -1,5 +1,5 @@
 using System.Linq;
-using CrestCreates.EventBus.Abstractions;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.EventBus.Local;
 using CrestCreates.Form;
 using CrestCreates.Form.Abstractions;
@@ -20,10 +20,8 @@ using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using ErpManagement.Application.Approval;
 using ErpManagement.Application.Contracts.Events;
-using ErpManagement.Application.Events;
-using ErpManagement.Application.Contracts.Integration;
-using ErpManagement.Application.Integration;
 using ErpManagement.Domain.Shared.Constants;
+using ErpManagement.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -59,9 +57,11 @@ public static class ErpRuntimeRegistration
             Schema = configuration["Erp:Runtime:Schema"] ?? "crest_erp_runtime",
             ApplyMigrations = true
         });
+        services.Remove(services.Single(descriptor => descriptor.ServiceType == typeof(IAuditSink)
+            && descriptor.ImplementationType == typeof(PostgreSqlAuditSink)));
+        services.AddSingleton<PostgreSqlAuditSink>();
+        services.AddSingleton<IAuditSink, ErpHttpAuditSink>();
         services.AddRuntimeDelivery();
-        services.AddOutboxDeliveryHandler<ErpManagement.Application.Events.ErpStockPostedOutboxHandler>(
-            ErpManagement.Domain.Shared.Constants.ErpContractIds.StockPostedContractId);
 
         services.AddSingleton<ISchemaRegistry>(schemaRegistry);
         services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
@@ -85,24 +85,7 @@ public static class ErpRuntimeRegistration
         services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, ErpSalesOrderDecisionConsumer>(
             ErpContractIds.SalesDecisionConsumerId);
 
-        // StockPosted integration event: reliable consumption proven by the business inbox.
-        services.AddOutboxRequiredConsumer<StockPostedEvent, ErpStockPostedInboxConsumer>(
-            ErpContractIds.StockPostedConsumerId);
-
-        // P3 demonstrates outbound contracts in-process. Production RabbitMQ would bind canonical
-        // events with [CrestEvent], JsonContracts codecs, and AddRabbitMqEventBus, using
-        // deploy/docker-compose.rabbitmq.yml as the broker overlay.
-        services.AddCrestLocalEventDispatch(builder =>
-        {
-            builder.Declare<StockChanged>();
-            builder.Declare<MesWorkOrderReleased>();
-            builder.Declare<MesWorkOrderCompleted>();
-            builder.Declare<CrmCustomerChanged>();
-        });
-        services.AddScoped<IntegrationOutboundLogHandler>();
-        services.AddScoped<ILocalEventHandler<MesWorkOrderReleased>>(sp => sp.GetRequiredService<IntegrationOutboundLogHandler>());
-        services.AddScoped<ILocalEventHandler<MesWorkOrderCompleted>>(sp => sp.GetRequiredService<IntegrationOutboundLogHandler>());
-        services.AddScoped<ILocalEventHandler<CrmCustomerChanged>>(sp => sp.GetRequiredService<IntegrationOutboundLogHandler>());
+        services.AddCrestLocalEventDispatch(builder => builder.Declare<StockChanged>());
 
         services.AddSingleton<IDescriptorLookup>(new ErpDescriptorLookup(
             ErpDescriptorCatalog.Schemas.Cast<IDescriptor>()

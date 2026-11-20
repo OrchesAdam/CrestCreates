@@ -48,13 +48,13 @@ public class WorkOrder : AuditedEntity<Guid>
         Status = WorkOrderStatus.Released;
     }
 
-    public WorkOrderReport AddReport(decimal quantity, string source)
+    public WorkOrderReport AddReport(decimal quantity, string source, Guid operationId)
     {
         if (Status is not (WorkOrderStatus.Released or WorkOrderStatus.InProgress))
             throw new InvalidOperationException("Only released or in-progress work orders accept reports.");
         var total = Reports.Sum(report => report.ReportedQuantity) + quantity;
         if (quantity <= 0 || total > Quantity) throw new ArgumentOutOfRangeException(nameof(quantity));
-        var report = new WorkOrderReport(Guid.NewGuid(), Id, quantity, source, DateTimeOffset.UtcNow, TenantId);
+        var report = new WorkOrderReport(Guid.NewGuid(), Id, quantity, source, DateTimeOffset.UtcNow, TenantId, operationId);
         Reports.Add(report);
         Status = total == Quantity ? WorkOrderStatus.Completed : WorkOrderStatus.InProgress;
         return report;

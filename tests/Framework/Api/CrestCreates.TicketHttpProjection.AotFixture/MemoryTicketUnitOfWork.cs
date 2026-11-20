@@ -1,3 +1,4 @@
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.UnitOfWork;
 
 namespace CrestCreates.TicketHttpProjection.AotFixture;
@@ -8,7 +9,7 @@ namespace CrestCreates.TicketHttpProjection.AotFixture;
 /// and capabilities are declared exactly as implemented. It is bound under OrmProvider.EfCore only
 /// because that enum has no memory member; no EF provider claim is made.
 /// </summary>
-public sealed class MemoryTicketUnitOfWork : IUnitOfWork
+public sealed class MemoryTicketUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
 {
     private readonly TicketMemoryStore _store;
     private readonly TicketBusinessObserver _observer;
@@ -66,7 +67,11 @@ public sealed class MemoryTicketUnitOfWork : IUnitOfWork
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
-    public void Dispose()
+    /// <summary>
+    /// 未完成退出的终结：回滚未完成窗口并丢弃其写入。快照式事务没有未 flush 的跟踪写入，
+    /// 恢复快照即丢弃；无未完成工作时为 no-op，容忍重复调用。
+    /// </summary>
+    public void AbandonPendingWork()
     {
         (List<TicketRow> Tickets, SlaRow? Sla)? snapshot;
         lock (_sync)
@@ -83,6 +88,8 @@ public sealed class MemoryTicketUnitOfWork : IUnitOfWork
 
         ReleaseGate();
     }
+
+    public void Dispose() => AbandonPendingWork();
 
     private void ReleaseGate()
     {

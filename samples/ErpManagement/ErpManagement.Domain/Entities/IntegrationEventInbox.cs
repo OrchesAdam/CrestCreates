@@ -12,16 +12,19 @@ public class IntegrationEventInbox : AuditedEntity<Guid>
     public string ContractId { get; private set; } = string.Empty;
     public DateTimeOffset ReceivedAt { get; private set; }
     public Guid TenantId { get; private set; }
+    public string PayloadHash { get; private set; } = string.Empty;
 
     protected IntegrationEventInbox() { }
 
-    public IntegrationEventInbox(Guid id, string consumerId, string messageId, string contractId, DateTimeOffset receivedAt, Guid tenantId)
+    public IntegrationEventInbox(Guid id, string consumerId, string messageId, string contractId, DateTimeOffset receivedAt, Guid tenantId, string payloadHash)
     {
         Id = id;
         ConsumerId = consumerId;
         MessageId = messageId;
         ContractId = contractId;
         ReceivedAt = receivedAt;
+        CreationTime = receivedAt.UtcDateTime;
         TenantId = tenantId;
+        PayloadHash = payloadHash;
     }
 }

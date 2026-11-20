@@ -23,7 +23,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Npgsql;
-using Testcontainers.PostgreSql;
+using CrestCreates.TestServices;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
@@ -40,15 +40,20 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     private const string InitialMigration = "20261118014835_InitialCreate";
     private const string HostNullIndex = "IX_SettingValues_Name_Scope_ProviderKey";
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("crest_setting_feature_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly string _server = ExternalTestServices.RequiredConnectionString(
+        "CREST_ERP_TEST_PG_CONNECTION", "PostgreSQL 16");
+    private string _postgres = null!;
 
-    public async Task InitializeAsync() => await _postgres.StartAsync();
+    public async Task InitializeAsync()
+    {
+        // 每类一次性隔离库：EnsureCreated 在空库上才建表，共享服务器上的既有表会使其 no-op。
+        _postgres = await ExternalTestServices.CreateIsolatedDatabaseAsync(_server, "setfeat");
+    }
 
-    public async Task DisposeAsync() => await _postgres.DisposeAsync();
+    public async Task DisposeAsync()
+    {
+        await ExternalTestServices.DropDatabaseAsync(_server, ExternalTestServices.DatabaseName(_postgres));
+    }
 
     [Fact]
     public async Task Erp_migration_creates_and_drops_the_host_null_unique_index()
@@ -634,7 +639,7 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     private async Task<string> CreateSchemaAsync()
     {
         var schema = $"sf_{Guid.NewGuid():N}";
-        await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
+        await using var connection = new NpgsqlConnection(_postgres);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""CREATE SCHEMA "{schema}";""";
@@ -643,7 +648,7 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     }
 
     private string SchemaConnectionString(string schema)
-        => $"{_postgres.GetConnectionString()};Search Path={schema}";
+        => $"{_postgres};Search Path={schema}";
 
     private ErpManagementDbContext CreateErpContext(string schema)
     {

@@ -308,28 +308,23 @@ public sealed class AccountabilityArchitectureTests
     public void LegacyAuditLoggingIsNotEnabledByDefault()
     {
         var source = File.ReadAllText(RepositoryPath(
-            "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
+            "samples/ErpManagement/ErpManagement.Web/Program.cs"));
 
-        Assert.Contains("app.UseAccountabilityHttpTerminalObserver();", source, StringComparison.Ordinal);
-        Assert.Contains("app.UseAccountabilityHttpOperationScope();", source, StringComparison.Ordinal);
+        Assert.Contains("app.UseCrestWeb();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("app.UseAuditLogging();", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void LibraryManagementPreservesGlobalExceptionCoverageAndAuthenticatedOperationScope()
+    public void ErpManagementPreservesGlobalExceptionCoverageAndAuthenticatedOperationScope()
     {
+        // The sample delegates to UseCrestWeb, whose pipeline order is guarded above; a hand-rolled
+        // pipeline in the host would bypass those ordering guarantees.
         var source = File.ReadAllText(RepositoryPath(
-            "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
+            "samples/ErpManagement/ErpManagement.Web/Program.cs"));
 
-        Assert.True(
-            source.IndexOf("app.UseAccountabilityHttpTerminalObserver();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
-        Assert.True(
-            source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseRouting();", StringComparison.Ordinal));
-        Assert.True(
-            source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseAccountabilityHttpOperationScope();", StringComparison.Ordinal));
+        Assert.Contains("app.UseCrestWeb();", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("app.UseExceptionHandling();", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("app.UseAccountabilityHttpTerminalObserver();", source, StringComparison.Ordinal);
     }
 
     [Fact]

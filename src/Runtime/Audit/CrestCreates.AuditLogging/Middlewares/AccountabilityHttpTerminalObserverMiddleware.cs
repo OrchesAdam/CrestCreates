@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using System;
@@ -103,7 +105,12 @@ public sealed class AccountabilityHttpTerminalObserverMiddleware : IMiddleware
                 },
                 Descriptors = AuditDescriptorContext.Empty,
                 Evidence = [],
-                Tags = AuditTagMap.Empty
+                Tags = new Dictionary<string, string>
+                {
+                    ["http.method"] = method,
+                    ["http.route"] = endpointIdentity,
+                    ["http.status"] = statusCode.ToString()
+                }.ToImmutableSortedDictionary(StringComparer.Ordinal)
             };
 
             try

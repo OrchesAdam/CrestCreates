@@ -10,7 +10,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 /// Coordinator top-level commit-boundary contract tests. The ambient-rejection
 /// path is proven without a live database by pre-setting the internal
 /// transaction accessor; the top-level commit path is exercised by curation
-/// integration tests against Testcontainers.
+/// integration tests against the long-lived PostgreSQL test instance.
 /// </summary>
 public sealed class PostgreSqlRuntimeCoordinatorModeTests
 {

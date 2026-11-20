@@ -24,6 +24,7 @@ public class UserAppService : IUserAppService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IPasswordPolicyValidator _passwordPolicyValidator;
     private readonly ICurrentTenant _currentTenant;
+    private readonly ITenantProvider _tenantProvider;
     private readonly ICurrentUser _currentUser;
     private readonly IFeatureChecker _featureChecker;
     private readonly IIdentitySecurityLogWriter _securityLogWriter;
@@ -36,6 +37,7 @@ public class UserAppService : IUserAppService
         IPasswordHasher passwordHasher,
         IPasswordPolicyValidator passwordPolicyValidator,
         ICurrentTenant currentTenant,
+        ITenantProvider tenantProvider,
         ICurrentUser currentUser,
         IFeatureChecker featureChecker,
         IIdentitySecurityLogWriter securityLogWriter,
@@ -47,6 +49,7 @@ public class UserAppService : IUserAppService
         _passwordHasher = passwordHasher;
         _passwordPolicyValidator = passwordPolicyValidator;
         _currentTenant = currentTenant;
+        _tenantProvider = tenantProvider;
         _currentUser = currentUser;
         _featureChecker = featureChecker;
         _securityLogWriter = securityLogWriter;
@@ -58,8 +61,8 @@ public class UserAppService : IUserAppService
         CancellationToken cancellationToken = default)
     {
         await EnsureManageGrantedAsync();
-        var tenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));
-        EnsureTenantOperable(tenantId);
+        var requestedTenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));
+        EnsureTenantOperable(requestedTenantId);
         await EnsureSuperAdminChangeAllowedAsync(input.IsSuperAdmin);
 
         if (!await _featureChecker.IsEnabledAsync("Identity.UserCreationEnabled", cancellationToken))
@@ -67,6 +70,13 @@ public class UserAppService : IUserAppService
             throw new InvalidOperationException("用户创建功能已禁用");
         }
 
+        var tenant = await _tenantProvider.GetTenantAsync(requestedTenantId, cancellationToken);
+        if (tenant is null || !string.Equals(tenant.Id, requestedTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"租户 ID '{requestedTenantId}' 无效或不可用");
+        }
+
+        var tenantId = tenant.Id;
         var userName = NormalizeRequired(input.UserName, nameof(input.UserName));
         var email = NormalizeRequired(input.Email, nameof(input.Email));
 

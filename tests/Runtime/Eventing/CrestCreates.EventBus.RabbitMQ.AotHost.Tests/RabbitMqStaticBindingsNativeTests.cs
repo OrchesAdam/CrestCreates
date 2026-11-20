@@ -1,9 +1,8 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using CrestCreates.TestServices;
 using FluentAssertions;
 using Xunit;
 
@@ -20,9 +19,18 @@ public sealed class RabbitMqStaticBindingsNativeTests
 {
     private const string Sentinel = "CRESTCREATES_RABBITMQ_STATIC_BINDINGS_NATIVE_OK";
 
-    private static readonly string HostName = Environment.GetEnvironmentVariable("CREST_RABBITMQ_HOST") ?? "localhost";
-    private static readonly int AmqpPort = int.TryParse(Environment.GetEnvironmentVariable("CREST_RABBITMQ_PORT"), out var port) ? port : 5672;
-    private static readonly int ManagementPort = int.TryParse(Environment.GetEnvironmentVariable("CREST_RABBITMQ_MGMT_PORT"), out var mgmtPort) ? mgmtPort : 15672;
+    private sealed record Broker(string Host, int AmqpPort, int ManagementPort, string User, string Password)
+    {
+        public static Broker FromEnvironment() => new(Required("CREST_RABBITMQ_HOST"),
+            ReadPort("CREST_RABBITMQ_PORT"), ReadPort("CREST_RABBITMQ_MGMT_PORT"),
+            Required("CREST_RABBITMQ_USER"), Required("CREST_RABBITMQ_PASSWORD"));
+
+        private static string Required(string variable) => ExternalTestServices.RequiredConnectionString(variable, "RabbitMQ");
+
+        private static int ReadPort(string variable) => int.TryParse(Required(variable), out var port) && port is > 0 and <= 65535
+            ? port
+            : throw new InvalidOperationException($"{variable} must be a valid TCP port.");
+    }
 
     [Fact]
     public async Task Publish_trimmed_fixture_runs_the_official_mainline_against_a_real_broker()
@@ -41,35 +49,38 @@ public sealed class RabbitMqStaticBindingsNativeTests
 
     private static async Task RunGateAsync(string gate, string publishMode, TimeSpan publishTimeout, TimeSpan runTimeout)
     {
-        await EnsureBrokerAsync();
-        var vhost = "itest127aot_" + Guid.NewGuid().ToString("N")[..12];
-        await CreateVHostAsync(vhost);
-
+        var broker = Broker.FromEnvironment();
+        await TestServiceControl.WaitTcpAsync(broker.Host, broker.AmqpPort, TimeSpan.FromSeconds(30));
+        using var management = CreateManagementClient(broker);
+        var vhost = $"itest127aot_{Guid.NewGuid():N}";
         var root = FindRepoRoot();
         var output = Path.Combine(Path.GetTempPath(), $"crest-127-aot-{gate}-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(output);
-
+        var deleteVHost = false;
         var evidence = new Dictionary<string, object?>
         {
             ["gate"] = "rabbitmq-static-bindings-" + gate,
             ["mode"] = publishMode,
-            ["sha"] = ResolveSha(root),
+            ["sha"] = await ResolveShaAsync(root),
             ["rid"] = "linux-x64",
             ["sdk"] = Environment.Version.ToString(),
             ["vhost"] = vhost
         };
-        string? failure = null;
+        Exception? failure = null;
 
         try
         {
+            Directory.CreateDirectory(output);
+            // A failed request may still have created this run's unique vhost.
+            deleteVHost = true;
+            await CreateVHostAsync(management, vhost, broker.User);
             var project = Path.Combine(
                 root,
                 "tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost/CrestCreates.EventBus.RabbitMQ.AotHost.csproj");
-            var publishCommand =
-                $"publish \"{project}\" -c Release -r linux-x64 --self-contained true -p:{publishMode} " +
-                $"--disable-build-servers -o \"{output}\"";
-            evidence["publishCommand"] = "dotnet " + publishCommand;
-            var publish = await RunProcessAsync("dotnet", publishCommand, publishTimeout);
+            string[] publishArguments = ["publish", project, "-c", "Release", "-r", "linux-x64",
+                "--self-contained", "true", $"-p:{publishMode}", "--disable-build-servers", "-o", output];
+            evidence["publishCommand"] = "dotnet " + string.Join(' ', publishArguments);
+            var publish = await TestServiceControl.RunProcessAsync("dotnet", publishArguments, publishTimeout,
+                new Dictionary<string, string?> { ["MSBUILDDISABLENODEREUSE"] = "1" });
             evidence["publishExitCode"] = publish.ExitCode;
             evidence["publishLog"] = publish.Output;
             publish.ExitCode.Should().Be(0, publish.Output);
@@ -97,15 +108,14 @@ public sealed class RabbitMqStaticBindingsNativeTests
                 | UnixFileMode.GroupExecute
                 | UnixFileMode.OtherExecute);
 
-            var execution = await RunProcessAsync(
-                executable,
-                string.Empty,
-                runTimeout,
-                new Dictionary<string, string>
+            var execution = await TestServiceControl.RunProcessAsync(executable, [], runTimeout,
+                new Dictionary<string, string?>
                 {
-                    ["CREST127_HOST"] = HostName,
-                    ["CREST127_PORT"] = AmqpPort.ToString(),
-                    ["CREST127_MGMT_PORT"] = ManagementPort.ToString(),
+                    ["CREST127_HOST"] = broker.Host,
+                    ["CREST127_PORT"] = broker.AmqpPort.ToString(),
+                    ["CREST127_MGMT_PORT"] = broker.ManagementPort.ToString(),
+                    ["CREST127_USER"] = broker.User,
+                    ["CREST127_PASSWORD"] = broker.Password,
                     ["CREST127_VHOST"] = vhost,
                 });
             evidence["executionExitCode"] = execution.ExitCode;
@@ -121,117 +131,58 @@ public sealed class RabbitMqStaticBindingsNativeTests
         }
         catch (Exception exception)
         {
-            failure = $"{exception.GetType().Name}: {exception.Message}";
-            throw;
+            failure = exception;
         }
-        finally
-        {
-            WriteEvidence(root, evidence, failure is null ? "passed" : "failed", failure);
-            await DeleteVHostAsync(vhost);
-            if (Directory.Exists(output))
-            {
-                Directory.Delete(output, recursive: true);
-            }
-        }
-    }
 
-    private static async Task EnsureBrokerAsync()
-    {
         try
         {
-            using var tcp = new TcpClient();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await tcp.ConnectAsync(HostName, AmqpPort, cts.Token);
+            await ExternalTestServices.CleanupAsync([
+                () => deleteVHost ? DeleteVHostAsync(management, vhost) : Task.CompletedTask,
+                () =>
+                {
+                    if (Directory.Exists(output))
+                        Directory.Delete(output, recursive: true);
+                    return Task.CompletedTask;
+                }
+            ], failure);
+            WriteEvidence(root, evidence, "passed", null);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Assert.Fail(
-                $"RabbitMQ is not reachable at {HostName}:{AmqpPort} ({ex.Message}). " +
-                "Start it with: DOCKER_HOST=unix:///run/user/1000/podman/podman.sock podman start crestcreates-test-rabbitmq");
+            WriteEvidence(root, evidence, "failed", $"{exception.GetType().Name}: {exception.Message}");
+            throw;
         }
     }
 
-    private static HttpClient CreateManagementClient()
+    private static HttpClient CreateManagementClient(Broker broker)
     {
         var client = new HttpClient
         {
-            BaseAddress = new Uri($"http://{HostName}:{ManagementPort}/api/"),
+            BaseAddress = new UriBuilder("http", broker.Host, broker.ManagementPort, "/api/").Uri,
             Timeout = TimeSpan.FromSeconds(20),
         };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic",
-            Convert.ToBase64String(Encoding.ASCII.GetBytes("guest:guest")));
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{broker.User}:{broker.Password}")));
         return client;
     }
 
-    private static async Task CreateVHostAsync(string vhost)
+    private static async Task CreateVHostAsync(HttpClient client, string vhost, string user)
     {
-        using var client = CreateManagementClient();
-        using var created = await client.PutAsync(
-            $"vhosts/{vhost}",
-            new StringContent("""{"description":"itest127-aot","tags":[]}""", Encoding.UTF8, "application/json"));
-        created.IsSuccessStatusCode.Should().BeTrue($"the harness must be able to create vhost '{vhost}'");
+        using var vhostBody = new StringContent("""{"description":"itest127-aot","tags":[]}""", Encoding.UTF8, "application/json");
+        using var created = await client.PutAsync($"vhosts/{vhost}", vhostBody);
+        created.EnsureSuccessStatusCode();
 
-        using var permissions = await client.PutAsync(
-            $"permissions/{vhost}/guest",
-            new StringContent("""{"configure":".*","write":".*","read":".*"}""", Encoding.UTF8, "application/json"));
-        permissions.IsSuccessStatusCode.Should().BeTrue($"the harness must be able to grant permissions on '{vhost}'");
+        using var permissionBody = new StringContent("""{"configure":".*","write":".*","read":".*"}""", Encoding.UTF8, "application/json");
+        using var permissions = await client.PutAsync($"permissions/{vhost}/{Uri.EscapeDataString(user)}", permissionBody);
+        permissions.EnsureSuccessStatusCode();
     }
 
-    private static async Task DeleteVHostAsync(string vhost)
+    private static async Task DeleteVHostAsync(HttpClient client, string vhost)
     {
-        try
-        {
-            using var client = CreateManagementClient();
-            using var response = await client.DeleteAsync($"vhosts/{vhost}");
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        TimeSpan timeout,
-        Dictionary<string, string>? environment = null)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            }
-        };
-        process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-        if (environment is not null)
-        {
-            foreach (var pair in environment)
-            {
-                process.StartInfo.Environment[pair.Key] = pair.Value;
-            }
-        }
-
-        process.Start();
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var timeoutSource = new CancellationTokenSource(timeout);
-        try
-        {
-            await process.WaitForExitAsync(timeoutSource.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
-            throw new TimeoutException($"Process '{fileName} {arguments}' exceeded the bounded fixture timeout.");
-        }
-
-        return (process.ExitCode, await stdout + await stderr);
+        using var response = await client.DeleteAsync($"vhosts/{vhost}");
+        if (response.StatusCode != HttpStatusCode.NotFound)
+            response.EnsureSuccessStatusCode();
     }
 
     private static void WriteEvidence(
@@ -254,30 +205,17 @@ public sealed class RabbitMqStaticBindingsNativeTests
         }
     }
 
-    private static string ResolveSha(string root)
+    private static async Task<string> ResolveShaAsync(string root)
     {
         var sha = Environment.GetEnvironmentVariable("GITHUB_SHA");
         if (!string.IsNullOrWhiteSpace(sha))
-        {
-            return sha!;
-        }
+            return sha;
 
         try
         {
-            using var process = Process.Start(new ProcessStartInfo("git", "rev-parse HEAD")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                WorkingDirectory = root
-            });
-            if (process is null)
-            {
-                return "unknown";
-            }
-
-            var output = process.StandardOutput.ReadToEnd().Trim();
-            process.WaitForExit(10_000);
-            return output.Length > 0 ? output : "unknown";
+            var (exitCode, output) = await TestServiceControl.RunProcessAsync(
+                "git", ["rev-parse", "HEAD"], TimeSpan.FromSeconds(10), workingDirectory: root);
+            return exitCode == 0 ? output.Trim() : "unknown";
         }
         catch (Exception)
         {

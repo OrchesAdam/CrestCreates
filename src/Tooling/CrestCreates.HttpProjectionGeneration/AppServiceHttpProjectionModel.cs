@@ -37,6 +37,8 @@ public sealed record AppServiceHttpProjectionModel
 
     public required AppServiceHttpRegistrationMode RegistrationMode { get; init; }
 
+    public bool ActivateSeparately { get; init; }
+
     public required IReadOnlyList<AppServiceHttpActionModel> Actions { get; init; }
 
     /// <summary>

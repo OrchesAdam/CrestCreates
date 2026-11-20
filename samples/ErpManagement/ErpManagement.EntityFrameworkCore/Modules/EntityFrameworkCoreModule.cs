@@ -39,12 +39,14 @@ public class EntityFrameworkCoreModule : ModuleBase
             var currentTenant = serviceProvider.GetService<ICurrentTenant>();
             var connectionString = currentTenant?.Tenant?.ConnectionString
                                    ?? configuration.GetConnectionString("Default");
-            options.UseNpgsql(connectionString);
+            options.UseNpgsql(connectionString).AddInterceptors(new StockBalanceConflictInterceptor());
         });
 
         services.AddCrestCreatesEfCorePostgreSql();
 
         services.AddUnitOfWork(OrmProvider.EfCore);
+        services.AddScoped<ErpManagement.Application.Events.IErpOutboxAppender, ErpOutboxAppender>();
+        services.AddScoped<ErpManagement.Application.Events.IErpGoodsReceiptDelivery, ErpDeliveryStatusReader>();
         services.AddEfCoreUnitOfWork();
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<ErpManagementDbContext>());
         services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>

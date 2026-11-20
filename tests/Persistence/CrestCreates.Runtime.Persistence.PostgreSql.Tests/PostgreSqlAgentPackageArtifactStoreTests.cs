@@ -235,7 +235,7 @@ public sealed class PostgreSqlAgentPackageArtifactStoreTests(PostgreSqlRuntimeCo
             var versions = new List<string>();
             await using var reader = await history.ExecuteReaderAsync();
             while (await reader.ReadAsync()) versions.Add(reader.GetString(0));
-            versions.TakeLast(2).Should().Equal("V014", "V015");
+            versions.Should().ContainInOrder("V014", "V015");
         }
         foreach (var table in new[] { "agent_package_artifacts", "agent_evidence_artifacts" })
         {

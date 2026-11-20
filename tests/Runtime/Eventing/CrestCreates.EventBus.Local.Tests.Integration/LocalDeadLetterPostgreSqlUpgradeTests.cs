@@ -4,10 +4,10 @@ using System.Threading.Tasks;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.DeadLetter.EFCore;
+using CrestCreates.TestServices;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.EventBus.Local.Tests.Integration;
@@ -20,27 +20,13 @@ namespace CrestCreates.EventBus.Local.Tests.Integration;
 /// </summary>
 public sealed class LocalDeadLetterPostgreSqlUpgradeTests : IAsyncLifetime
 {
-    private PostgreSqlContainer? _container;
     private string _connectionString = string.Empty;
     private string _schema = string.Empty;
 
     public async Task InitializeAsync()
     {
-        var external = Environment.GetEnvironmentVariable("CREST_LOCAL_EVENT_PG_CONNECTION");
-        if (string.IsNullOrWhiteSpace(external))
-        {
-            _container = new PostgreSqlBuilder("postgres:16-alpine")
-                .WithDatabase("crest_local_event_tests")
-                .WithUsername("crest")
-                .WithPassword("crest")
-                .Build();
-            await _container.StartAsync();
-            _connectionString = _container.GetConnectionString();
-        }
-        else
-        {
-            _connectionString = external;
-        }
+        _connectionString = ExternalTestServices.RequiredConnectionString(
+            "CREST_LOCAL_EVENT_PG_CONNECTION", "PostgreSQL 16");
 
         _schema = $"itest_{Guid.NewGuid():N}";
         await using var connection = new NpgsqlConnection(_connectionString);
@@ -62,11 +48,6 @@ public sealed class LocalDeadLetterPostgreSqlUpgradeTests : IAsyncLifetime
         }
         catch (Exception)
         {
-        }
-
-        if (_container is not null)
-        {
-            await _container.DisposeAsync();
         }
     }
 

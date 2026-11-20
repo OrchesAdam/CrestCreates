@@ -99,7 +99,7 @@ public sealed class OpenIddictSeedClosureArchitectureTests
 
         foreach (var expected in new[]
                  {
-                     "samples/LibraryManagement",
+                     "samples/ErpManagement",
                      "samples/SaaSHelpdesk",
                      "src/Platform/CrestCreates.Web",
                  })

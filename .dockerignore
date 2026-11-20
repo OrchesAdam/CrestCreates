@@ -7,6 +7,15 @@
 **/logs/
 **/*.log
 **/*.pfx
+**/.env
+**/.env.*
+**/.envrc
+**/.npmrc
+**/secrets.json
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+**/playwright-report/
+**/test-results/
 .git/
 99_RecycleBin/
 samples/ErpManagement/deploy/publish/

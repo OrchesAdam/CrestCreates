@@ -21,6 +21,33 @@ namespace CrestCreates.Application.Tests.Permissions;
 public class PermissionGrantAppServiceTests
 {
     [Fact]
+    public async Task My_permissions_use_the_authenticated_identity_without_management_permission()
+    {
+        var userId = Guid.NewGuid().ToString();
+        var user = new Mock<ICurrentUser>();
+        user.SetupGet(x => x.Id).Returns(userId);
+        user.SetupGet(x => x.IsAuthenticated).Returns(true);
+        user.SetupGet(x => x.TenantId).Returns("tenant-a");
+        var tenant = new Mock<ICurrentTenant>();
+        tenant.SetupGet(x => x.Id).Returns("tenant-a");
+        var roles = new Mock<IRoleRepository>();
+        roles.Setup(x => x.GetByUserIdAsync(Guid.Parse(userId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Role { Name = "Approver", TenantId = "tenant-a" }]);
+        var grants = new Mock<IPermissionGrantManager>();
+        grants.Setup(x => x.GetEffectivePermissionsAsync(userId, It.IsAny<IEnumerable<string>>(), "tenant-a", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(["HumanTask.Search", "HumanTask.Complete"]);
+        var service = new PermissionGrantAppService(grants.Object, roles.Object, Mock.Of<IUserRepository>(),
+            tenant.Object, Mock.Of<IPermissionChecker>(), user.Object);
+
+        var result = await service.GetMyEffectivePermissionsAsync();
+        result.UserId.Should().Be(userId);
+        result.Permissions.Should().Equal("HumanTask.Search", "HumanTask.Complete");
+
+        tenant.SetupGet(x => x.Id).Returns("tenant-b");
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetMyEffectivePermissionsAsync());
+    }
+
+    [Fact]
     public async Task GetUserEffectivePermissionsAsync_WithTenantId_OnlyUsesRolesInCurrentTenant()
     {
         var permissionGrantManagerMock = new Mock<IPermissionGrantManager>();
@@ -67,7 +94,8 @@ public class PermissionGrantAppServiceTests
             roleRepositoryMock.Object,
             userRepositoryMock.Object,
             currentTenantMock.Object,
-            permissionCheckerMock.Object);
+            permissionCheckerMock.Object,
+            Mock.Of<ICurrentUser>());
 
         var result = await service.GetUserEffectivePermissionsAsync(
             "11111111-1111-1111-1111-111111111111",
@@ -355,7 +383,7 @@ public class PermissionGrantAppServiceTests
             .Returns(Task.CompletedTask);
 
         var service = new PermissionGrantAppService(
-            manager, roles.Object, users.Object, tenant.Object, checker.Object);
+            manager, roles.Object, users.Object, tenant.Object, checker.Object, Mock.Of<ICurrentUser>());
 
         var action = CreateMutation(service, operation, Guid.NewGuid(), " tenant-a ");
 
@@ -412,7 +440,7 @@ public class PermissionGrantAppServiceTests
         var checker = new Mock<IPermissionChecker>();
 
         return (
-            new PermissionGrantAppService(manager.Object, roles.Object, users.Object, tenant.Object, checker.Object),
+            new PermissionGrantAppService(manager.Object, roles.Object, users.Object, tenant.Object, checker.Object, Mock.Of<ICurrentUser>()),
             manager,
             users,
             roles,

@@ -17,6 +17,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 /// （替换 IRelationalTransactionFactory 装饰受管事务：Commit=1、Rollback=0、Dispose=1——
 /// 证明 CAP 适配未额外驱动生命周期）。计数按事务实例每操作恰一次（同步/异步路径合并计一次）。
 /// </summary>
+[Collection("CapLongLivedServices")]
 public class BorrowedHandleLifecycleTests : IClassFixture<CapIntegrationFixture>
 {
     private readonly CapIntegrationFixture _fixture;

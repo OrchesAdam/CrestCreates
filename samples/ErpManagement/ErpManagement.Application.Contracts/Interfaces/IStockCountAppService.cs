@@ -33,8 +33,9 @@ public interface IStockCountAppService
         Route = "{id}",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { ErpPermissions.StockCounts.Update })]
-    Task<StockCountDto> UpdateAsync(Guid id, UpdateStockCountDto input, CancellationToken cancellationToken = default);
+        Permissions = new[] { ErpPermissions.StockCounts.Update },
+        RequiresConcurrencyToken = true)]
+    Task<StockCountDto> UpdateAsync(Guid id, UpdateStockCountDto input, string? expectedStamp = null, CancellationToken cancellationToken = default);
 
     [AppServiceHttpAction(
         Verb = HttpProjectionVerb.Delete,

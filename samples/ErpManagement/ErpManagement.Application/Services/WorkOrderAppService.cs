@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization.Abstractions;
@@ -5,7 +6,6 @@ using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Settings;
-using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Exceptions;
@@ -14,7 +14,7 @@ using ErpManagement.Application.Contracts.DTOs;
 using ErpManagement.Application.Contracts.Interfaces;
 using ErpManagement.Application.Contracts.Integration;
 using ErpManagement.Application.Integration;
-using Microsoft.Extensions.Logging;
+using ErpManagement.Application.Events;
 using ErpManagement.Domain.Entities;
 using ErpManagement.Domain.Shared.Enums;
 using ErpManagement.Domain.Shared.Permissions;
@@ -45,8 +45,7 @@ public class WorkOrderAppService(
     StockPostingManager stockPosting,
     ISettingProvider settings,
     ICurrentPrincipalAccessor principalAccessor,
-    ILocalEventBus localEvents,
-    ILogger<WorkOrderAppService> logger)
+    ErpIntegrationOutbox outbox)
     : CrestAppServiceBase<WorkOrder, Guid, WorkOrderDto, CreateWorkOrderDto, UpdateWorkOrderDto>(
         repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker), IWorkOrderAppService
 {
@@ -118,17 +117,8 @@ public class WorkOrderAppService(
         return MapToDto(await repository.UpdateAsync(entity, ct));
     }
 
-    public async Task<WorkOrderDto> ReleaseAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var released = await ReleaseCoreAsync(id, cancellationToken);
-        await localEvents.PublishIfEnabledAsync(features, "Erp.MesIntegration",
-            new MesWorkOrderReleased(released.Id, released.MaterialId, released.Quantity, released.TenantId, DateTimeOffset.UtcNow),
-            logger, cancellationToken);
-        return released;
-    }
-
     [UnitOfWorkMo]
-    private async Task<WorkOrderDto> ReleaseCoreAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<WorkOrderDto> ReleaseAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await CheckPermissionAsync(ErpPermissions.WorkOrders.Release, cancellationToken);
         var order = await LoadAsync(id, cancellationToken);
@@ -155,38 +145,56 @@ public class WorkOrderAppService(
         var allowNegative = bool.TryParse(await settings.GetOrNullAsync("Erp.AllowNegativeStockGlobal", cancellationToken), out var allowed) && allowed;
         await stockPosting.PostAsync(tenantId, issues, allowNegative, "WorkOrder", id, cancellationToken);
         order.Release(requirements);
-        return await SaveAsync(order, cancellationToken);
-    }
-
-    public async Task<WorkOrderDto> ReportAsync(Guid id, WorkOrderReportInput input, CancellationToken cancellationToken = default)
-    {
-        var fromMes = principalAccessor.IsClient(currentTenant, ErpIntegrationClients.Mes);
-        var (order, reportedAt) = await ReportCoreAsync(id, input, fromMes, cancellationToken);
-        if (order.Status == WorkOrderStatus.Completed)
-        {
-            await localEvents.PublishIfEnabledAsync(features, "Erp.MesIntegration",
-                new MesWorkOrderCompleted(order.Id, order.Quantity, reportedAt, order.TenantId), logger, cancellationToken);
-        }
-        return order;
+        var result = await SaveAsync(order, cancellationToken);
+        await outbox.AppendAsync(new MesWorkOrderReleased(order.Id, order.MaterialId, order.Quantity,
+            order.TenantId, DateTimeOffset.UtcNow), cancellationToken);
+        return result;
     }
 
     [UnitOfWorkMo]
-    private async Task<(WorkOrderDto Order, DateTimeOffset ReportedAt)> ReportCoreAsync(
-        Guid id, WorkOrderReportInput input, bool fromMes, CancellationToken cancellationToken)
+    public async Task<WorkOrderDto> ReportAsync(Guid id, WorkOrderReportInput input, CancellationToken cancellationToken = default)
     {
+        var fromMes = principalAccessor.IsClient(currentTenant, ErpIntegrationClients.Mes);
         if (fromMes)
+        {
+            await features.RequireAsync("Erp.MesIntegration", cancellationToken);
             await features.RequireAsync("Erp.Production", cancellationToken);
+        }
         else
+        {
             await CheckPermissionAsync(ErpPermissions.WorkOrders.Report, cancellationToken);
+        }
+
+        if (input.OperationId == Guid.Empty)
+            throw new CrestValidationException("报工需要非空的 operationId。");
+
+        var tenantId = TenantId;
+        var order = await repository.GetWithLinesForUpdateAsync(tenantId, id, cancellationToken)
+            ?? throw new KeyNotFoundException($"WorkOrder {id} 不存在。");
+        var source = fromMes ? "MES" : "Manual";
+        var recorded = order.Reports.SingleOrDefault(report => report.TenantId == tenantId && report.OperationId == input.OperationId);
+        var resultType = ErpOperationReplayJsonContext.Default.WorkOrderDto;
+        if (recorded is not null)
+        {
+            if (recorded.ReportedQuantity != input.ReportedQuantity || recorded.ReportSource != source)
+                throw new ErpOperationConflictException();
+            var replay = JsonSerializer.Deserialize(recorded.GetOperationResult(), resultType)
+                ?? throw new InvalidOperationException("The stored work order report result is empty.");
+            return replay;
+        }
+
         ValidateQuantity(input.ReportedQuantity);
-        var order = await LoadAsync(id, cancellationToken);
-        var report = order.AddReport(input.ReportedQuantity, fromMes ? "MES" : "Manual");
+        var report = order.AddReport(input.ReportedQuantity, source, input.OperationId);
         var location = await ResolveLocationAsync(order.MaterialId, cancellationToken);
         var allowNegative = bool.TryParse(await settings.GetOrNullAsync("Erp.AllowNegativeStockGlobal", cancellationToken), out var allowed) && allowed;
-        await stockPosting.PostAsync(TenantId,
+        await stockPosting.PostAsync(tenantId,
             [new StockMovementInput(order.MaterialId, location.WarehouseId, location.Id, input.ReportedQuantity, StockMovementType.Receipt)],
-            allowNegative, "WorkOrder", id, cancellationToken);
-        return (await SaveAsync(order, cancellationToken), report.ReportedAt);
+            allowNegative, "WorkOrder", id, cancellationToken, input.OperationId);
+        var result = await SaveAsync(order, cancellationToken);
+        report.RecordOperationResult(JsonSerializer.Serialize(result, resultType));
+        if (order.Status == WorkOrderStatus.Completed)
+            await outbox.AppendAsync(new MesWorkOrderCompleted(order.Id, order.Quantity, report.ReportedAt, order.TenantId), cancellationToken);
+        return result;
     }
 
     [UnitOfWorkMo]

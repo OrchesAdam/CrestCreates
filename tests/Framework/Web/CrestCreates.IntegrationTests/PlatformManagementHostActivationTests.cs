@@ -52,6 +52,9 @@ public class PlatformManagementHostActivationTests
                 .BeTrue($"AddCrestWeb must register {contract.Name} for the platform activation");
         }
 
+        probe!.IsService(typeof(CrestCreates.Application.Contracts.Interfaces.IAuditRetentionAppService))
+            .Should().BeFalse();
+
         var act = () => app.MapCrestCapabilityEndpoints();
         act.Should().NotThrow("AddCrestWeb registers every platform contract the aggregate activation requires");
     }

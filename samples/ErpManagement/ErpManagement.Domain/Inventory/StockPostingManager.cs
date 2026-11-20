@@ -1,4 +1,6 @@
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using ErpManagement.Domain.Entities;
 using ErpManagement.Domain.Shared.Enums;
 
@@ -7,7 +9,8 @@ namespace ErpManagement.Domain.Inventory;
 /// <summary>Single posting entry point. Balances may not be mutated anywhere else.</summary>
 public sealed class StockPostingManager(
     ICrestRepositoryBase<StockBalance, Guid> balances,
-    ICrestRepositoryBase<StockTransaction, Guid> transactions)
+    ICrestRepositoryBase<StockTransaction, Guid> transactions,
+    ICurrentUser currentUser)
 {
     public async Task<IReadOnlyList<StockMovementResult>> PostAsync(
         Guid tenantId,
@@ -15,30 +18,50 @@ public sealed class StockPostingManager(
         bool allowNegativeStock,
         string sourceDocType,
         Guid sourceDocId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? sourceOperationId = null)
     {
+        StockTransaction.ValidateSource(sourceDocType, sourceDocId);
+        var postedAt = DateTime.UtcNow;
+        var actorId = Guid.TryParse(currentUser.Id, out var userId) ? userId : (Guid?)null;
         var results = new List<StockMovementResult>(movements.Count);
+        var batchBalances = new Dictionary<(Guid MaterialId, Guid WarehouseId, Guid StorageLocationId), (StockBalance Balance, bool IsNew)>();
         foreach (var movement in movements)
         {
-            var balance = balances.GetQueryable().FirstOrDefault(b =>
-                b.TenantId == tenantId && b.MaterialId == movement.MaterialId
-                && b.WarehouseId == movement.WarehouseId && b.StorageLocationId == movement.StorageLocationId);
+            var key = (movement.MaterialId, movement.WarehouseId, movement.StorageLocationId);
+            if (!batchBalances.TryGetValue(key, out var entry))
+            {
+                var balance = await balances.GetAsync(b =>
+                    b.TenantId == tenantId && b.MaterialId == key.MaterialId
+                    && b.WarehouseId == key.WarehouseId && b.StorageLocationId == key.StorageLocationId, cancellationToken);
+                entry = (balance ?? new StockBalance(Guid.NewGuid(), key.MaterialId, key.WarehouseId, key.StorageLocationId, tenantId), balance is null);
+                batchBalances.Add(key, entry);
+            }
 
-            var isNew = balance is null;
-            balance ??= new StockBalance(Guid.NewGuid(), movement.MaterialId, movement.WarehouseId, movement.StorageLocationId, tenantId);
+            var newQuantity = entry.Balance.ApplyMovement(movement.SignedQuantity, allowNegativeStock);
 
-            var newQuantity = balance.ApplyMovement(movement.SignedQuantity, allowNegativeStock);
-
-            if (isNew)
-                await balances.InsertAsync(balance, cancellationToken);
-            else
-                await balances.UpdateAsync(balance, cancellationToken);
-
-            await transactions.InsertAsync(new StockTransaction(
+            var transaction = new StockTransaction(
                 Guid.NewGuid(), movement.MaterialId, movement.WarehouseId, movement.StorageLocationId,
-                movement.SignedQuantity, newQuantity, movement.MovementType, sourceDocType, sourceDocId, tenantId), cancellationToken);
+                movement.SignedQuantity, newQuantity, movement.MovementType, sourceDocType, sourceDocId, tenantId, sourceOperationId);
+            AuditPropertySetter.SetCreationAudit(transaction, postedAt, actorId);
+            await transactions.InsertAsync(transaction, cancellationToken);
 
             results.Add(new StockMovementResult(movement.MaterialId, movement.WarehouseId, movement.StorageLocationId, newQuantity, movement.MovementType));
+        }
+
+        foreach (var (balance, isNew) in batchBalances.Values)
+        {
+            if (isNew)
+            {
+                AuditPropertySetter.SetCreationAudit(balance, postedAt, actorId);
+                await balances.InsertAsync(balance, cancellationToken);
+            }
+            else
+            {
+                balance.LastModificationTime = postedAt;
+                balance.LastModifierId = actorId;
+                await balances.UpdateAsync(balance, cancellationToken);
+            }
         }
 
         return results;

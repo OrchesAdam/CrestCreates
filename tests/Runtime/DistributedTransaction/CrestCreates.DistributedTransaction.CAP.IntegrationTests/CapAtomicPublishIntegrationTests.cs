@@ -6,7 +6,6 @@ using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
@@ -15,6 +14,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 /// #125 S3 故障矩阵（真实 PG + RabbitMQ）：投递以 CAP 存储扫描恢复完成（名义扫描等待 ~30-40s，
 /// lookback=30s + interval=2s）；「投递成功」以 cap."published" 行 StatusName=Succeeded（broker ack）为证。
 /// </summary>
+[Collection("CapLongLivedServices")]
 public class CapAtomicPublishIntegrationTests : IClassFixture<CapIntegrationFixture>
 {
     private static readonly TimeSpan ScanWait = TimeSpan.FromSeconds(150);
@@ -206,16 +206,10 @@ public class CapAtomicPublishIntegrationTests : IClassFixture<CapIntegrationFixt
     {
         var topic = NewTopic("identity-mismatch");
 
-        await using var otherPostgres = new PostgreSqlBuilder("postgres:16-alpine")
-            .WithDatabase("cap_uow_other")
-            .WithUsername("test")
-            .WithPassword("test")
-            .Build();
-        await otherPostgres.StartAsync();
-
         // UoW 指向另一个数据库，CAP 存储仍指向主库：发布必须在写入前确定性拒绝。
+        var otherConnectionString = await _fixture.CreateIsolatedDatabaseAsync($"cap_uow_other_{Guid.NewGuid():N}");
         var host = await _fixture.CreateHostAsync(
-            otherPostgres.GetConnectionString(),
+            otherConnectionString,
             _fixture.RabbitMqConnectionString,
             ensureUowSchema: true,
             capStorageConnectionString: _fixture.PostgresConnectionString);

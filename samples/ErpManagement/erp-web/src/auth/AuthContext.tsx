@@ -1,8 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, clearTokens, getAccessToken, getTenantId, setTenantId, unwrap } from '../api/client';
+import { api, clearTokens, getAccessToken, getTenantId, parseJwt, setTenantId, unwrap } from '../api/client';
 import { login as loginRequest } from '../api/auth';
 
+interface OperationIdentity {
+  userId: string;
+  tenantId: string | null;
+}
+
 interface AuthState {
+  operationIdentity: OperationIdentity | null;
   isAuthenticated: boolean;
   userName: string;
   userId: string;
@@ -18,17 +24,8 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState>(null!);
 
-function parseJwt(token: string): Record<string, string> {
-  try {
-    const payload = token.split('.')[1];
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(json);
-  } catch {
-    return {};
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [operationIdentity, setOperationIdentity] = useState<OperationIdentity | null>(null);
   const [userName, setUserName] = useState('');
   const [userId, setUserId] = useState('');
   const [tenantId, setTenantIdState] = useState('');
@@ -38,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getAccessToken());
 
   const loadIdentity = useCallback(async () => {
+    setOperationIdentity(null);
     const token = getAccessToken();
     if (!token) {
       setIsAuthenticated(false);
@@ -54,11 +52,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(true);
     if (id) {
       try {
-        const resp = await api.get('/api/permission-grant/user-effective-permissions', {
-          params: { userId: id },
-        });
-        const payload = unwrap<{ permissions?: string[] }>(resp.data);
+        const resp = await api.get('/api/permission-grants/me');
+        const payload = unwrap<{ userId?: string; tenantId?: string | null; permissions?: string[] }>(resp.data);
         setPermissions(payload?.permissions ?? []);
+        if (payload?.userId === id) {
+          setOperationIdentity({ userId: id, tenantId: payload.tenantId || null });
+        }
       } catch {
         setPermissions([]);
       }
@@ -77,6 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     clearTokens();
+    setOperationIdentity(null);
     setIsAuthenticated(false);
     setUserName('');
     setUserId('');
@@ -95,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AuthState>(
     () => ({
+      operationIdentity,
       isAuthenticated,
       userName,
       userId,
@@ -107,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       switchTenant,
       reloadPermissions: loadIdentity,
     }),
-    [isAuthenticated, userName, userId, tenantId, permissions, loading, login, logout, hasPermission, switchTenant, loadIdentity],
+    [operationIdentity, isAuthenticated, userName, userId, tenantId, permissions, loading, login, logout, hasPermission, switchTenant, loadIdentity],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

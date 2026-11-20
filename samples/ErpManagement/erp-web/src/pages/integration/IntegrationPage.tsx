@@ -17,8 +17,8 @@ const meta: Record<Kind, {
     endpoint: '/api/integration/mes/work-orders/{workOrderId}/report',
     method: 'POST',
     keyHeader: 'X-Integration-Api-Key',
-    body: '{ "reportedQuantity": 1 }',
-    description: 'MES 回写工单报工数量；需 Erp.MesIntegration 功能开启并携带集成 API-Key。',
+    body: '{ "operationId": "945af5c8-102e-4eb8-9932-86ab90366cad", "reportedQuantity": 1 }',
+    description: '需启用 Erp.MesIntegration 并携带集成 API-Key。每次报工使用新的 UUID，重试时沿用原 UUID 和数量。同一工单的操作 ID 对应不同请求时返回 409。',
   },
   crm: {
     feature: 'Erp.CrmIntegration',

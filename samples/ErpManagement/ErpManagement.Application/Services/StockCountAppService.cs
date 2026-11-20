@@ -2,6 +2,7 @@ using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
@@ -26,12 +27,14 @@ public class StockCountAppService
       IStockCountAppService
 {
     private readonly IStockCountRepository _countRepository;
+    private readonly ICrestRepositoryBase<StockBalance, Guid> _balances;
     private readonly ICurrentTenant _currentTenant;
     private readonly ISettingProvider _settingProvider;
     private readonly StockPostingManager _stockPostingManager;
 
     public StockCountAppService(
         IStockCountRepository countRepository,
+        ICrestRepositoryBase<StockBalance, Guid> balances,
         IServiceProvider serviceProvider,
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
@@ -42,6 +45,7 @@ public class StockCountAppService
         : base(countRepository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _countRepository = countRepository;
+        _balances = balances;
         _currentTenant = currentTenant;
         _settingProvider = settingProvider;
         _stockPostingManager = stockPostingManager;
@@ -57,7 +61,7 @@ public class StockCountAppService
             "SC", (n, ct) => _countRepository.AnyAsync(c => c.Number == n, ct), cancellationToken);
         var count = new StockCount(Guid.NewGuid(), number, input.WarehouseId, CurrentTenantId);
         count.SetNotes(input.Notes);
-        count.ReplaceLines(BuildLines(input.Lines, count.Id, CurrentTenantId));
+        await SetLinesAsync(count, input.Lines, cancellationToken);
         await SetCreationAuditPropertiesAsync(count);
         var created = await _countRepository.InsertAsync(count, cancellationToken);
         return MapToDto(created);
@@ -77,14 +81,22 @@ public class StockCountAppService
         return counts.Select(MapToDto).ToList();
     }
 
+    protected override bool RequiresConcurrencyStampOnUpdate => true;
+
     [UnitOfWorkMo]
-    public override async Task<StockCountDto> UpdateAsync(Guid id, UpdateStockCountDto input, CancellationToken cancellationToken = default)
+    public async Task<StockCountDto> UpdateAsync(Guid id, UpdateStockCountDto input, string? expectedStamp = null, CancellationToken cancellationToken = default)
     {
         await CheckPermissionAsync(UpdatePermissionName, cancellationToken);
         var count = await _countRepository.GetWithLinesAsync(id, cancellationToken)
                     ?? throw new KeyNotFoundException($"盘点单不存在: {id}");
+        if (string.IsNullOrWhiteSpace(expectedStamp))
+            throw new CrestCreates.Domain.Exceptions.CrestPreconditionRequiredException(nameof(StockCount), id);
+        if (count.ConcurrencyStamp != expectedStamp)
+            throw new CrestCreates.Domain.Exceptions.CrestConcurrencyException(nameof(StockCount), id);
+        var originalStamp = count.ConcurrencyStamp;
         count.SetNotes(input.Notes);
-        count.ReplaceLines(BuildLines(input.Lines, count.Id, CurrentTenantId));
+        await SetLinesAsync(count, input.Lines, cancellationToken);
+        count.ConcurrencyStamp = originalStamp;
         await SetModificationAuditPropertiesAsync(count);
         var updated = await _countRepository.UpdateAsync(count, cancellationToken);
         return MapToDto(updated);
@@ -104,7 +116,10 @@ public class StockCountAppService
         var allowNegativeValue = await _settingProvider.GetOrNullAsync("Erp.AllowNegativeStockGlobal", cancellationToken);
         var allowNegativeStock = bool.TryParse(allowNegativeValue, out var parsed) && parsed;
 
-        // Only non-zero differences post: gain (+delta) or loss (-delta), signed quantity = delta.
+        if (count.Lines.Select(l => (l.MaterialId, l.StorageLocationId)).Distinct().Count() != count.Lines.Count)
+            throw new InvalidOperationException("盘点单不能包含重复的物料和库位组合。");
+
+        // Apply the discrepancy captured by the count while preserving movements after its snapshot.
         var movements = count.Lines
             .Where(l => l.Difference != 0)
             .Select(l => new StockMovementInput(
@@ -113,7 +128,7 @@ public class StockCountAppService
             .ToList();
 
         await _stockPostingManager.PostAsync(
-            CurrentTenantId, movements, allowNegativeStock, "StockCount", count.Id, cancellationToken);
+            count.TenantId, movements, allowNegativeStock, nameof(StockCount), count.Id, cancellationToken);
 
         count.Post();
         await SetModificationAuditPropertiesAsync(count);
@@ -121,11 +136,52 @@ public class StockCountAppService
         return MapToDto(updated);
     }
 
-    private static List<StockCountLine> BuildLines(List<CountLineInput> lines, Guid countId, Guid tenantId)
+    private async Task SetLinesAsync(StockCount count, List<CountLineInput> inputs, CancellationToken cancellationToken)
     {
-        return lines.Select(l => new StockCountLine(
-            Guid.NewGuid(), countId, l.MaterialId, l.StorageLocationId,
-            l.BookQuantity, l.CountedQuantity, tenantId)).ToList();
+        if (count.Status != StockCountStatus.Draft)
+            throw new InvalidOperationException("只有草稿盘点单可以编辑。");
+        if (inputs.Select(l => (l.MaterialId, l.StorageLocationId)).Distinct().Count() != inputs.Count)
+            throw new ArgumentException("盘点单不能包含重复的物料和库位组合。", nameof(inputs));
+        if (inputs.Any(l => l.CountedQuantity < 0))
+            throw new ArgumentException("实盘数量不能为负数。", nameof(inputs));
+
+        var existing = count.Lines.GroupBy(l => (l.MaterialId, l.StorageLocationId))
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+        var newMaterialIds = inputs.Where(l => !existing.ContainsKey((l.MaterialId, l.StorageLocationId)))
+            .Select(l => l.MaterialId).Distinct().ToArray();
+        var snapshot = newMaterialIds.Length == 0
+            ? new Dictionary<(Guid, Guid), decimal>()
+            : (await _balances.GetListAsync(b => b.TenantId == count.TenantId && b.WarehouseId == count.WarehouseId
+                && newMaterialIds.Contains(b.MaterialId), cancellationToken))
+                .ToDictionary(b => (b.MaterialId, b.StorageLocationId), b => b.Quantity);
+
+        var lines = new List<StockCountLine>(inputs.Count);
+        foreach (var input in inputs)
+        {
+            var key = (input.MaterialId, input.StorageLocationId);
+            if (existing.TryGetValue(key, out var line))
+            {
+                if (line.CountedQuantity != input.CountedQuantity)
+                {
+                    line.SetCountedQuantity(input.CountedQuantity);
+                    await SetModificationAuditPropertiesAsync(line);
+                }
+            }
+            else
+            {
+                line = new StockCountLine(Guid.NewGuid(), count.Id, input.MaterialId, input.StorageLocationId,
+                    snapshot.GetValueOrDefault(key), input.CountedQuantity, count.TenantId);
+                await SetCreationAuditPropertiesAsync(line);
+            }
+            lines.Add(line);
+        }
+        var desiredIds = new HashSet<Guid>(lines.Select(l => l.Id));
+        foreach (var stale in count.Lines.Where(l => !desiredIds.Contains(l.Id)).ToList())
+            count.Lines.Remove(stale);
+        foreach (var line in lines)
+            if (!count.Lines.Contains(line))
+                count.Lines.Add(line);
     }
 
     protected override StockCount MapToEntity(CreateStockCountDto dto)

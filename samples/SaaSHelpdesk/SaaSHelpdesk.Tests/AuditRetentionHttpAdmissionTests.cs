@@ -46,6 +46,20 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
     }
 
     [Fact]
+    public async Task Default_host_serves_users_without_publishing_retention()
+    {
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+        using (client)
+        {
+            using var users = await client.GetAsync("/api/users");
+            users.StatusCode.Should().Be(HttpStatusCode.OK, await users.Content.ReadAsStringAsync());
+
+            using var retention = await client.PostAsJsonAsync("/api/audit-retention/preview", new { storeId = StoreId });
+            retention.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+    }
+
+    [Fact]
     public async Task Rejections_never_touch_the_provider_and_granted_execution_succeeds()
     {
         var store = new FakeRetentionStore();

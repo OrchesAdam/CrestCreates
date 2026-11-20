@@ -1,59 +1,83 @@
 using System;
 using System.Threading.Tasks;
 using CrestCreates.HealthCheck.Mvc.HealthChecks;
-using DotNet.Testcontainers.Builders;
+using CrestCreates.TestServices;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using StackExchange.Redis;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
 public class HealthConnectivityIntegrationTests
 {
+    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(60);
+
     [Fact]
     public async Task Database_opens_real_connection_and_detects_stopped_server()
     {
-        await using var server = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await server.StartAsync();
-        var builder = new NpgsqlConnectionStringBuilder(server.GetConnectionString()) { Pooling = false, Timeout = 2 };
+        var server = ExternalTestServices.RequiredConnectionString("CREST_HEALTH_TEST_PG_CONNECTION", "PostgreSQL 17");
+        await using var service = await TestServiceControl.AcquirePostgresAsync(DedicatedTestService.HealthPostgres, server);
+        var builder = new NpgsqlConnectionStringBuilder(server) { Pooling = false, Timeout = 2 };
         NpgsqlConnection? connection = null;
         var check = new DatabaseHealthCheck(() => connection = new NpgsqlConnection(builder.ConnectionString));
         Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(new HealthCheckContext())).Status);
         Assert.Equal(System.Data.ConnectionState.Closed, connection!.State);
-        await server.StopAsync();
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-        Assert.Equal(HealthStatus.Unhealthy, result.Status);
-        Assert.Empty(result.Data);
-        Assert.Null(result.Exception);
+        try
+        {
+            await service.StopAsync();
+            var result = await check.CheckHealthAsync(new HealthCheckContext());
+            Assert.Equal(HealthStatus.Unhealthy, result.Status);
+            Assert.Empty(result.Data);
+            Assert.Null(result.Exception);
+        }
+        finally
+        {
+            await service.RecoverAsync(() => TestServiceControl.WaitPostgresAsync(builder.ConnectionString, ReadinessTimeout));
+        }
     }
 
     [Fact]
     public async Task Redis_pings_real_server_and_detects_stopped_server_without_disposing_connection()
     {
-        await using var server = new ContainerBuilder().WithImage("redis:7-alpine")
-            .WithPortBinding(6379, true)
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(6379)).Build();
-        await server.StartAsync();
+        var endpoint = ExternalTestServices.RequiredConnectionString("CREST_HEALTH_TEST_REDIS_ENDPOINT", "Redis 7");
+        var parts = endpoint.Split(':', 2);
+        if (parts.Length != 2 || !int.TryParse(parts[1], out var port))
+            throw new InvalidOperationException("CREST_HEALTH_TEST_REDIS_ENDPOINT must be a host and port.");
+
+        await using var service = await TestServiceControl.AcquireAsync(DedicatedTestService.HealthRedis, parts[0], port);
         using var connection = await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions
         {
-            EndPoints = { { server.Hostname, server.GetMappedPublicPort(6379) } },
+            EndPoints = { { parts[0], port } },
             AbortOnConnectFail = false,
             AsyncTimeout = 500,
             ConnectTimeout = 2000
         });
         var check = new RedisHealthCheck(connection, TimeSpan.FromSeconds(2));
         Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(new HealthCheckContext())).Status);
-        await server.StopAsync();
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-        Assert.Equal(HealthStatus.Unhealthy, result.Status);
-        Assert.Empty(result.Data);
-        Assert.Null(result.Exception);
-        await server.StartAsync();
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!connection.IsConnected && DateTime.UtcNow < deadline)
-            await Task.Delay(100);
+        try
+        {
+            await service.StopAsync();
+            var result = await check.CheckHealthAsync(new HealthCheckContext());
+            Assert.Equal(HealthStatus.Unhealthy, result.Status);
+            Assert.Empty(result.Data);
+            Assert.Null(result.Exception);
+        }
+        finally
+        {
+            await service.RecoverAsync(() => TestServiceControl.WaitUntilAsync(async cancellation =>
+            {
+                try
+                {
+                    return connection.IsConnected && await connection.GetDatabase().PingAsync().WaitAsync(cancellation) > TimeSpan.Zero;
+                }
+                catch (RedisException)
+                {
+                    return false;
+                }
+            }, ReadinessTimeout, "Redis ping"));
+        }
+
         Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(new HealthCheckContext())).Status);
     }
 }

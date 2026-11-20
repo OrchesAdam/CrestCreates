@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.EntityFrameworkCore/SaaSHelpdesk.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../../tests/Shared/CrestCreates.TestServices/CrestCreates.TestServices.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,8 +24,6 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Testcontainers" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="OpenIddict.EntityFrameworkCore" />
     <PackageReference Include="OpenIddict.EntityFrameworkCore.Models" />

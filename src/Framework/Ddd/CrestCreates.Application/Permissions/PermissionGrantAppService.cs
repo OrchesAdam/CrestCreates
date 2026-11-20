@@ -22,19 +22,22 @@ public class PermissionGrantAppService : IPermissionGrantAppService
     private readonly IUserRepository _userRepository;
     private readonly ICurrentTenant _currentTenant;
     private readonly IPermissionChecker _permissionChecker;
+    private readonly ICurrentUser _currentUser;
 
     public PermissionGrantAppService(
         IPermissionGrantManager permissionGrantManager,
         IRoleRepository roleRepository,
         IUserRepository userRepository,
         ICurrentTenant currentTenant,
-        IPermissionChecker permissionChecker)
+        IPermissionChecker permissionChecker,
+        ICurrentUser currentUser)
     {
         _permissionGrantManager = permissionGrantManager;
         _roleRepository = roleRepository;
         _userRepository = userRepository;
         _currentTenant = currentTenant;
         _permissionChecker = permissionChecker;
+        _currentUser = currentUser;
     }
 
     public async Task GrantToUserAsync(
@@ -132,6 +135,25 @@ public class PermissionGrantAppService : IPermissionGrantAppService
 
         await EnsureTenantUserReadableAsync(userId, cancellationToken);
 
+        return await GetEffectivePermissionsAsync(userId, effectiveTenantId, cancellationToken);
+    }
+
+    public Task<UserEffectivePermissionsDto> GetMyEffectivePermissionsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(_currentUser.Id))
+            throw new UnauthorizedAccessException();
+
+        var tenantId = _currentTenant.Id;
+        if (!string.Equals(_currentUser.TenantId?.Trim() ?? string.Empty, tenantId?.Trim() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException();
+
+        return GetEffectivePermissionsAsync(_currentUser.Id, tenantId, cancellationToken);
+    }
+
+    private async Task<UserEffectivePermissionsDto> GetEffectivePermissionsAsync(string userId, string? effectiveTenantId,
+        CancellationToken cancellationToken)
+    {
         var roleNames = await GetRoleNamesAsync(userId, effectiveTenantId, cancellationToken);
         var permissions = await _permissionGrantManager.GetEffectivePermissionsAsync(
             userId,

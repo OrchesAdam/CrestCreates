@@ -8,7 +8,12 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
-internal sealed class PostgreSqlTransactionalOutboxWriter : ITransactionalOutboxWriter
+public interface IPostgreSqlOutboxAppender
+{
+    ValueTask<OutboxAppendResult> AppendAsync(NpgsqlTransaction transaction, OutboxMessage message, CancellationToken cancellationToken = default);
+}
+
+internal sealed class PostgreSqlTransactionalOutboxWriter : ITransactionalOutboxWriter, IPostgreSqlOutboxAppender
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
     private readonly PostgreSqlRuntimeTransactionCoordinator _coordinator;
@@ -16,7 +21,25 @@ internal sealed class PostgreSqlTransactionalOutboxWriter : ITransactionalOutbox
     public PostgreSqlTransactionalOutboxWriter(PostgreSqlRuntimePersistenceOptions options, PostgreSqlRuntimeTransactionCoordinator coordinator)
     { _options = options; _coordinator = coordinator; _table = PostgreSqlRuntimeStoreSupport.Table(options, "runtime_outbox_messages"); }
 
-    public async ValueTask<OutboxAppendResult> AppendAsync(OutboxMessage message, CancellationToken cancellationToken = default)
+    public ValueTask<OutboxAppendResult> AppendAsync(OutboxMessage message, CancellationToken cancellationToken = default)
+        => AppendAsync(_coordinator.RequireSession(), message, cancellationToken);
+
+    public ValueTask<OutboxAppendResult> AppendAsync(NpgsqlTransaction transaction, OutboxMessage message, CancellationToken cancellationToken = default)
+    {
+        var connection = transaction.Connection ?? throw new InvalidOperationException("The PostgreSQL transaction is no longer active.");
+        var actual = new NpgsqlConnectionStringBuilder(connection.ConnectionString);
+        var expected = new NpgsqlConnectionStringBuilder(_options.ConnectionString);
+        if (actual.Host is null || actual.Host.Contains(',') ||
+            !string.Equals(actual.Host, expected.Host, StringComparison.OrdinalIgnoreCase) ||
+            actual.Port != expected.Port || !string.Equals(connection.Database, expected.Database ?? expected.Username, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Borrowed outbox writes require the fixed PostgreSQL runtime database.");
+        }
+
+        return AppendAsync(new PostgreSqlRuntimeSession { Connection = connection, Transaction = transaction }, message, cancellationToken);
+    }
+
+    private async ValueTask<OutboxAppendResult> AppendAsync(PostgreSqlRuntimeSession session, OutboxMessage message, CancellationToken cancellationToken)
     {
         if (!OutboxMessageMetadataCanonicalizer.IsCanonical(message.Metadata))
             throw new RuntimePersistenceContractException(
@@ -24,7 +47,6 @@ internal sealed class PostgreSqlTransactionalOutboxWriter : ITransactionalOutbox
                 "Outbox message timestamps must be UTC and canonicalized to microsecond precision before append.");
         if (!OutboxMessageIntegrity.Matches(message))
             throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, "Outbox message integrity does not match its immutable payload.");
-        var session = _coordinator.RequireSession();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
             $"insert into {_table} (message_id, contract_id, event_name, event_version, tenant_scope_kind, tenant_id, correlation_id, causation_id, occurred_at, required_consumer_ids_json, payload_utf8, integrity_json, created_at, available_at, updated_at) values (@id, @contract, @eventName, @eventVersion, @scope, @tenant, @correlation, @causation, @occurred, @consumers, @payload, @integrity, clock_timestamp(), clock_timestamp(), clock_timestamp()) on conflict (message_id) do nothing;");
         command.Parameters.AddWithValue("id", message.Metadata.MessageId);

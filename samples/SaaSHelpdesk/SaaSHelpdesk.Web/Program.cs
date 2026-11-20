@@ -1,4 +1,5 @@
 using CrestCreates.Web;
+using CrestCreates.Web.PlatformManagement;
 using CrestCreates.DynamicApi;
 using CrestCreates.Capability;
 using CrestCreates.Schema;
@@ -22,9 +23,11 @@ builder.AddCrestWeb();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddCrestCapabilityEndpoints();
-// The platform assembly also carries its own generated activation (audit retention). Name the
-// business activation explicitly so the two formally generated extensions never collide.
+// Qualify the Helpdesk activation because the platform assembly also exposes a generated extension.
 GeneratedAppServiceHttpActivation_SaaSHelpdesk_002EApplication.AddGeneratedAppServiceHttp(builder.Services);
+// Helpdesk serves platform management, including users and audit log queries. Retention requires
+// its own activation with a retention kernel and store.
+builder.Services.AddCrestPlatformManagementHttp();
 
 builder.Services.AddAuthentication()
     .AddScheme<SaaSHelpdesk.Web.Auth.CustomerApiKeyOptions, SaaSHelpdesk.Web.Auth.CustomerApiKeyAuthenticationHandler>(

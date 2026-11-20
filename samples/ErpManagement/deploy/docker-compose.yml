@@ -1,43 +1,66 @@
-# ErpManagement sample stack: PostgreSQL + ERP app (HTTPS).
-#
-# Dual-runtime compatible (docker compose / podman-compose). Readiness is handled by the
-# app entrypoint (TCP wait) rather than depends_on.condition, which podman-compose supports
-# inconsistently. The PostgreSQL image is expected to be present locally (Docker Hub is
-# unreachable in the target environment); build the app image first with deploy/build.sh.
-#
-#   ./build.sh                 # build frontend + backend + dev cert + app image
-#   docker compose up -d       # or: podman-compose up -d
-#   open https://localhost:8443  (admin / ErpDemo#2026)
+# ErpManagement sample stack (Development, HTTPS). Build the app image with build.sh first.
 services:
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: crest
-      POSTGRES_PASSWORD: crest
+      POSTGRES_PASSWORD: ${ERP_POSTGRES_PASSWORD:?Set ERP_POSTGRES_PASSWORD}
       POSTGRES_DB: erpmanagement
     volumes:
       - erp-pgdata:/var/lib/postgresql/data
-    ports:
-      - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U crest -d erpmanagement"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -Atqc 'SELECT 1' | grep -qx 1"]
       interval: 5s
       timeout: 5s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${ERP_RABBITMQ_USER:-erp}
+      RABBITMQ_DEFAULT_PASS: ${ERP_RABBITMQ_PASSWORD:?Set ERP_RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${ERP_RABBITMQ_VHOST:-erp}
+    volumes:
+      - erp-rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      # Use the broker user even during startup, so diagnostics cannot create a root-owned cookie.
+      test: ["CMD-SHELL", "su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 5672 && su-exec rabbitmq rabbitmq-diagnostics -q check_virtual_hosts"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
   erp-app:
+    image: ${ERP_APP_IMAGE:-erp-management:latest}
     build:
       context: .
       dockerfile: Dockerfile
-    image: erp-management:latest
     environment:
-      ConnectionStrings__Default: "Host=db;Port=5432;Database=erpmanagement;Username=crest;Password=crest"
-      DB_HOST: db
-      DB_PORT: "5432"
+      ERP_POSTGRES_PASSWORD: ${ERP_POSTGRES_PASSWORD:?Set ERP_POSTGRES_PASSWORD}
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__Port: "5672"
+      RabbitMQ__UserName: ${ERP_RABBITMQ_USER:-erp}
+      RabbitMQ__Password: ${ERP_RABBITMQ_PASSWORD:?Set ERP_RABBITMQ_PASSWORD}
+      RabbitMQ__VirtualHost: ${ERP_RABBITMQ_VHOST:-erp}
+      SeedIdentity__Password: ${ERP_E2E_ADMIN_PASSWORD:?Set ERP_E2E_ADMIN_PASSWORD}
+      SeedIdentity__ErpApproverPassword: ${ERP_E2E_PROCUREMENT_PASSWORD:?Set ERP_E2E_PROCUREMENT_PASSWORD}
+      SeedIdentity__ErpSalesApproverPassword: ${ERP_E2E_SALES_PASSWORD:?Set ERP_E2E_SALES_PASSWORD}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
-      - "8443:8443"
+      - "127.0.0.1:${ERP_HTTPS_PORT:-8443}:8443"
+    healthcheck:
+      # The body check catches the SPA's HTTP 200 fallback if the route is missing.
+      test: ["CMD-SHELL", "curl -kfsS --max-time 4 https://localhost:8443/health/ready | grep -qx Healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
 
 volumes:
   erp-pgdata:
+  erp-rabbitmqdata:

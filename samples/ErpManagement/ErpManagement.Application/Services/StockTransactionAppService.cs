@@ -1,6 +1,7 @@
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.MultiTenancy.Abstract;
 using ErpManagement.Application.Contracts.DTOs;
 using ErpManagement.Application.Contracts.Interfaces;
 using ErpManagement.Domain.Entities;
@@ -19,26 +20,33 @@ public class StockTransactionAppService : IStockTransactionAppService
 {
     private readonly ICrestRepositoryBase<StockTransaction, Guid> _repository;
     private readonly IPermissionChecker _permissionChecker;
+    private readonly ICurrentTenant _currentTenant;
 
     public StockTransactionAppService(
         ICrestRepositoryBase<StockTransaction, Guid> repository,
-        IPermissionChecker permissionChecker)
+        IPermissionChecker permissionChecker,
+        ICurrentTenant currentTenant)
     {
         _repository = repository;
         _permissionChecker = permissionChecker;
+        _currentTenant = currentTenant;
     }
+
+    private Guid CurrentTenantId => Guid.TryParse(_currentTenant.Id, out var id) ? id : Guid.Empty;
 
     public async Task<IReadOnlyList<StockTransactionDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         await _permissionChecker.CheckAsync(ErpPermissions.StockTransactions.Search);
-        var transactions = await _repository.GetListAsync(cancellationToken);
+        var tenantId = CurrentTenantId;
+        var transactions = await _repository.GetListAsync(t => t.TenantId == tenantId, cancellationToken);
         return transactions.Select(MapToDto).ToList();
     }
 
     public async Task<StockTransactionDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await _permissionChecker.CheckAsync(ErpPermissions.StockTransactions.Get);
-        var transaction = await _repository.GetAsync(id, cancellationToken);
+        var tenantId = CurrentTenantId;
+        var transaction = await _repository.GetAsync(t => t.Id == id && t.TenantId == tenantId, cancellationToken);
         return transaction == null ? null : MapToDto(transaction);
     }
 
@@ -53,6 +61,7 @@ public class StockTransactionAppService : IStockTransactionAppService
         MovementType = entity.MovementType,
         SourceDocType = entity.SourceDocType,
         SourceDocId = entity.SourceDocId,
+        SourceOperationId = entity.SourceOperationId,
         TenantId = entity.TenantId,
         CreationTime = entity.CreationTime,
         ConcurrencyStamp = entity.ConcurrencyStamp

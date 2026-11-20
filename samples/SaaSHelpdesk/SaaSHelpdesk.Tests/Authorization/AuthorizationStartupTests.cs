@@ -27,6 +27,9 @@ public class AuthorizationStartupTests
         builder.WebHost.UseTestServer();
         builder.Services.AddCrestAuthorization();
         builder.Services.AddScoped(_ => Mock.Of<ICurrentTenant>());
+        // ITenantProvider is owned by the MultiTenancy assembly entries; a minimal authorization-only
+        // host must supply its own leaf instead of the framework registering a second truth source.
+        builder.Services.AddScoped(_ => Mock.Of<ITenantProvider>());
         builder.Services.AddScoped(_ => Mock.Of<IPermissionGrantRepository>());
 
         var app = builder.Build();

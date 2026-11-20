@@ -1,8 +1,8 @@
 import { ModalForm, ProFormDigit } from '@ant-design/pro-components';
-import { Space } from 'antd';
+import { Button, Space } from 'antd';
 import { useAuth } from '../../auth/AuthContext';
 import CrudPage, { type FieldDef } from '../../components/CrudPage';
-import { labelOf, postDocAction } from '../../components/docUtils';
+import { labelOf, postDocAction, useOperationDocAction } from '../../components/docUtils';
 import { useMasterOptions } from '../../hooks/useMasterOptions';
 
 const apiPrefix = '/api/work-orders';
@@ -34,6 +34,7 @@ function getReports(record: Record<string, unknown>): WorkReport[] {
 export default function WorkOrderList() {
   const options = useMasterOptions();
   const { hasPermission } = useAuth();
+  const submitReport = useOperationDocAction();
   const fields: FieldDef[] = [
     { name: 'number', label: '单号', hideInForm: true, width: 160 },
     { name: 'materialId', label: '生产物料', type: 'select', options: options.materials, required: true },
@@ -85,6 +86,8 @@ export default function WorkOrderList() {
       }}
       rowActions={(record, reload) => {
         const url = `${apiPrefix}/${record.id}`;
+        const reportUrl = `${url}/report`;
+        const pendingReport = hasPermission('WorkOrder.Report') ? submitReport.pending(reportUrl) : null;
         const reported = getReports(record).reduce((total, report) => total + report.reportedQuantity, 0);
         const remaining = Number((Number(record.quantity) - reported).toFixed(4));
         return (
@@ -92,12 +95,17 @@ export default function WorkOrderList() {
             {record.status === 'Planned' && hasPermission('WorkOrder.Release') && (
               <a onClick={() => postDocAction(`${url}/release`, '工单已下达', reload)}>下达</a>
             )}
-            {(record.status === 'Released' || record.status === 'InProgress') && hasPermission('WorkOrder.Report') && (
+            {pendingReport ? (
+              <Button type="link" loading={submitReport.isSubmitting(reportUrl)}
+                onClick={() => void submitReport.submit(reportUrl, '报工成功', reload)}>
+                重试报工（{pendingReport.values.reportedQuantity}）
+              </Button>
+            ) : (record.status === 'Released' || record.status === 'InProgress') && hasPermission('WorkOrder.Report') && (
               <ModalForm<{ reportedQuantity: number }>
                 title={`报工 ${record.number}`}
                 trigger={<a>报工</a>}
                 modalProps={{ destroyOnClose: true }}
-                onFinish={(values) => postDocAction(`${url}/report`, '报工成功', reload, values)}
+                onFinish={(values) => submitReport.submit(reportUrl, '报工成功', reload, values)}
               >
                 <ProFormDigit name="reportedQuantity" label="报工数量" extra={`待报工 ${remaining}`}
                   rules={[{ required: true, type: 'number', min: 0.0001, max: remaining }]}

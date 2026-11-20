@@ -1,71 +1,74 @@
-using CrestCreates.Domain.Repositories;
+using System.Security.Cryptography;
+using System.Text.Json;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.Runtime.Delivery.Abstractions.Activation;
-using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Contracts;
 using ErpManagement.Application.Contracts.Events;
-using ErpManagement.Domain.Entities;
+using ErpManagement.Application.Contracts.Integration;
 using ErpManagement.Domain.Shared.Constants;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpManagement.Application.Events;
 
-/// <summary>
-/// Reliable-consumption proof for StockPosted: records one inbox row per (consumer, message).
-/// The unique index is the dedup authority; a racing insert loser observes Duplicate.
-/// P2 finance consumers attach to the same contract with their own consumer id.
-/// </summary>
-[GenerateOutboxConsumerActivation]
-public sealed partial class ErpStockPostedInboxConsumer : IOutboxRequiredConsumer<StockPostedEvent>
+public interface IErpIntegrationInbox
 {
-    private readonly ICurrentTenant _currentTenant;
-    private readonly ICrestRepositoryBase<IntegrationEventInbox, Guid> _inbox;
+    Task<ErpInboxWriteResult> RecordAsync(string consumerId, string messageId, string contractId, Guid tenantId,
+        string payloadHash, CancellationToken cancellationToken);
+}
 
-    public ErpStockPostedInboxConsumer(
-        ICurrentTenant currentTenant,
-        ICrestRepositoryBase<IntegrationEventInbox, Guid> inbox)
-    {
-        _currentTenant = currentTenant;
-        _inbox = inbox;
-    }
+public enum ErpInboxWriteResult
+{
+    Inserted,
+    Duplicate,
+    Conflict
+}
 
+/// <summary>Commits ERP's integration receipts before the broker subscription returns.</summary>
+public sealed class ErpStockPostedInboxConsumer(ICurrentTenant currentTenant, ITenantProvider tenants,
+    IErpIntegrationInbox inbox, ILogger<ErpStockPostedInboxConsumer> logger)
+{
     public const string ConsumerIdValue = ErpContractIds.StockPostedConsumerId;
-    public string ConsumerId => ConsumerIdValue;
+    public const string IntegrationConsumerId = "crest.erp.mes-crm-inbox/v1";
 
-    public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(
-        StockPostedEvent payload,
-        OutboxDeliveryContext context,
-        CancellationToken cancellationToken = default)
+    public Task ConsumeAsync(StockPostedEvent payload, CancellationToken cancellationToken = default)
+        => RecordAsync(payload, ConsumerIdValue, ErpIntegrationWire.StockPostedId, cancellationToken);
+
+    public Task ConsumeAsync(MesWorkOrderReleased payload, CancellationToken cancellationToken = default)
+        => RecordAsync(payload, IntegrationConsumerId, ErpIntegrationWire.MesWorkOrderReleasedId, cancellationToken);
+
+    public Task ConsumeAsync(MesWorkOrderCompleted payload, CancellationToken cancellationToken = default)
+        => RecordAsync(payload, IntegrationConsumerId, ErpIntegrationWire.MesWorkOrderCompletedId, cancellationToken);
+
+    public Task ConsumeAsync(CrmCustomerChanged payload, CancellationToken cancellationToken = default)
+        => RecordAsync(payload, IntegrationConsumerId, ErpIntegrationWire.CrmCustomerChangedId, cancellationToken);
+
+    private async Task RecordAsync<TEvent>(TEvent payload, string consumerId, string contractId,
+        CancellationToken cancellationToken) where TEvent : IErpIntegrationEvent
     {
-        using var tenantScope = await _currentTenant.ChangeAsync(payload.TenantId ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(payload.MessageId) || payload.MessageId.Length > OutboxContractLimits.MaxSemanticIdentifierLength)
+            throw new InvalidOperationException("ERP integration payload has an invalid message ID.");
 
-        var messageId = context.Message.Metadata.MessageId;
-        var alreadyRecorded = await _inbox.AnyAsync(
-            row => row.ConsumerId == ConsumerIdValue && row.MessageId == messageId,
-            cancellationToken).ConfigureAwait(false);
-        if (alreadyRecorded)
+        var tenantId = Guid.Empty;
+        if (payload.TenantKey is { } key && (!Guid.TryParseExact(key, "D", out tenantId) || tenantId == Guid.Empty))
+            throw new InvalidOperationException("ERP integration payload has an invalid tenant ID.");
+
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, ErpIntegrationWire.GetJsonTypeInfo<TEvent>());
+        var payloadHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        ITenantInfo? tenant = null;
+        if (tenantId != Guid.Empty)
         {
-            return OutboxRequiredConsumerResult.Duplicate();
+            var id = tenantId.ToString();
+            tenant = await tenants.GetTenantAsync(id, cancellationToken).ConfigureAwait(false);
+            if (tenant?.Id != id)
+                throw new InvalidOperationException($"ERP integration tenant '{id}' could not be resolved by ID.");
         }
 
-        var tenantId = Guid.TryParse(payload.TenantId, out var parsed) ? parsed : Guid.Empty;
-        try
-        {
-            await _inbox.InsertAsync(
-                new IntegrationEventInbox(
-                    Guid.NewGuid(),
-                    ConsumerIdValue,
-                    messageId,
-                    context.Message.Metadata.ContractId,
-                    DateTimeOffset.UtcNow,
-                    tenantId),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (DbUpdateException)
-        {
-            // Unique (ConsumerId, MessageId) violation: a concurrent delivery already recorded it.
-            return OutboxRequiredConsumerResult.Duplicate();
-        }
+        using var tenantScope = currentTenant.Change(tenant);
+        var result = await inbox.RecordAsync(consumerId, payload.MessageId, contractId, tenantId,
+            payloadHash, cancellationToken).ConfigureAwait(false);
 
-        return OutboxRequiredConsumerResult.Accepted();
+        if (result == ErpInboxWriteResult.Conflict)
+            throw new InvalidOperationException($"ERP inbox conflict for contract '{contractId}', message '{payload.MessageId}'.");
+
+        logger.LogDebug("ERP inbox {Result} for contract {ContractId}, message {MessageId}", result, contractId, payload.MessageId);
     }
 }

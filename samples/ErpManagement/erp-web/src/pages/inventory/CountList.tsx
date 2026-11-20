@@ -55,13 +55,6 @@ export default function CountList() {
               width="sm"
             />
             <ProFormDigit
-              name="bookQuantity"
-              label="账面数量"
-              rules={[{ required: true }]}
-              fieldProps={{ precision: 4 }}
-              width="sm"
-            />
-            <ProFormDigit
               name="countedQuantity"
               label="实盘数量"
               rules={[{ required: true }]}
@@ -74,7 +67,9 @@ export default function CountList() {
       transformSubmit={(values) => ({
         warehouseId: values.warehouseId,
         notes: values.notes,
-        lines: lineArray(values),
+        lines: lineArray(values).map(({ materialId, storageLocationId, countedQuantity }) => ({
+          materialId, storageLocationId, countedQuantity,
+        })),
       })}
       expandedRowRender={(record) => (
         <ul style={{ margin: 0, paddingLeft: 20 }}>

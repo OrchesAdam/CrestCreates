@@ -89,6 +89,21 @@ public class RabbitMqSettlementAndLifecycleTests : RabbitMqIntegrationTestBase
         (await Task.WhenAny(entered.Task, Task.Delay(TimeSpan.FromSeconds(10))) == entered.Task)
             .Should().BeTrue("the handler must be running when the host stops");
 
+        var consumer = first.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<CrestCreates.EventBus.RabbitMQ.Consuming.RabbitMqConsumer>().Single();
+        var owner = consumer.StopAsync(CancellationToken.None);
+        try
+        {
+            using var deadline = new CancellationTokenSource();
+            var concurrent = consumer.StopAsync(deadline.Token);
+            deadline.Cancel();
+            await concurrent.WaitAsync(TimeSpan.FromSeconds(3));
+            owner.IsCompleted.Should().BeFalse("the concurrent deadline must not interrupt the owner's drain");
+        }
+        finally
+        {
+            await owner.WaitAsync(TimeSpan.FromSeconds(30));
+        }
         await first.StopAsync(CancellationToken.None);
 
         // The unfinished delivery was never acked; the broker requeues it after the channel closes.

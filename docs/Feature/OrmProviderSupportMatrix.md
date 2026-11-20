@@ -10,7 +10,7 @@
 - **unsupported**：执行前确定性拒绝，不静默降级。
 - **unverified**：未验证；不等于已证明不支持。
 
-版本：EF Core 10.0.7；Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1；FreeSql 3.5.308；SqlSugarCore 5.1.4.214；SQLite 独立文件；PostgreSQL 16（Testcontainers，podman）。
+版本：EF Core 10.0.7；Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1；FreeSql 3.5.308；SqlSugarCore 5.1.4.214；SQLite 独立文件；PostgreSQL 16（长驻测试实例 `postgres:16-alpine`，`infra/docker-compose.test-services.yml`，podman）。
 
 ## 1. 能力矩阵
 
@@ -51,7 +51,7 @@
 
 ## 1.0.1 R3-08 MongoDB 定向边界（2026-11-11）
 
-此补充独立于上表的 EF/FreeSql/SqlSugar 组合，不提升该表任何支持等级。MongoDB 保留为 **experimental，standalone JIT**；执行面是 `MongoRepositoryBase<TEntity,TKey>`，驱动 MongoDB.Driver 3.4.0，真实服务器为 Podman/Testcontainers `mongo:7`，每例独立数据库。
+此补充独立于上表的 EF/FreeSql/SqlSugar 组合，不提升该表任何支持等级。MongoDB 保留为 **experimental，standalone JIT**；执行面是 `MongoRepositoryBase<TEntity,TKey>`，驱动 MongoDB.Driver 3.4.0，真实服务器为长驻 Podman 实例 `mongo:7`（`infra/docker-compose.test-services.yml`），每例独立数据库。
 
 - 所有普通读（同步 `IQueryable`、Get/List/Count/Any/Exists 与四种分页）组合 live-row 与租户条件，由 BSON serializer 解析具体成员映射。required 租户只读当前租户，host 无结果；optional 租户读自身与 null 共享行，host 只读 null；缺少 `ICurrentTenant` 按 host 处理。
 - 普通写不允许跨租户或租户写共享 null 行。最终 update/delete 条件保留持久 ownership、live-row、适用的 expected stamp；不能靠 detached entity 提交的 TenantId 改换持久归属。软删除只 patch `IsDeleted`/`DeletionTime` 与适用的 stamp，不 replacement 写入调用方其他字段；未接入当前用户的删除人审计，不新增平台 Audit Logging 背书。
@@ -100,7 +100,7 @@
 ### 2.3 数据库与驱动
 
 - SQLite：各 Provider 独立临时文件；原始行读取使用独立 `Microsoft.Data.Sqlite` 连接。
-- PostgreSQL：Testcontainers `postgres:16-alpine`；EF Core 10.0.7 + Npgsql 10.0.1。
+- PostgreSQL：长驻测试实例 `postgres:16-alpine`（`infra/docker-compose.test-services.yml`）；EF Core 10.0.7 + Npgsql 10.0.1。
 - FreeSql 3.5.308（`FreeSql.Provider.Sqlite`）；SqlSugarCore 5.1.4.214。
 
 ## 3. 迁移说明（兼容变化）

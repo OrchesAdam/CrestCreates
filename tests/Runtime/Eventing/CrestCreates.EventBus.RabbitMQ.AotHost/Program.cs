@@ -29,13 +29,20 @@ namespace CrestCreates.EventBus.RabbitMQ.AotHost;
 /// </summary>
 internal static class Program
 {
-    private static string HostName => Environment.GetEnvironmentVariable("CREST127_HOST") ?? "localhost";
-    private static int AmqpPort => int.TryParse(Environment.GetEnvironmentVariable("CREST127_PORT"), out var port) ? port : 5672;
-    private static int ManagementPort => int.TryParse(Environment.GetEnvironmentVariable("CREST127_MGMT_PORT"), out var port) ? port : 15672;
-    private static string UserName => Environment.GetEnvironmentVariable("CREST127_USER") ?? "guest";
-    private static string Password => Environment.GetEnvironmentVariable("CREST127_PASSWORD") ?? "guest";
-    private static string VHost => Environment.GetEnvironmentVariable("CREST127_VHOST")
-        ?? throw new InvalidOperationException("CREST127_VHOST must be provided by the harness.");
+    private static string HostName => Required("CREST127_HOST");
+    private static int AmqpPort => ReadPort("CREST127_PORT");
+    private static int ManagementPort => ReadPort("CREST127_MGMT_PORT");
+    private static string UserName => Required("CREST127_USER");
+    private static string Password => Required("CREST127_PASSWORD");
+    private static string VHost => Required("CREST127_VHOST");
+
+    private static string Required(string variable) => Environment.GetEnvironmentVariable(variable) is { Length: > 0 } value
+        ? value
+        : throw new InvalidOperationException($"{variable} must be provided by the harness.");
+
+    private static int ReadPort(string variable) => int.TryParse(Required(variable), out var port) && port is > 0 and <= 65535
+        ? port
+        : throw new InvalidOperationException($"{variable} must be a valid TCP port.");
 
     private static async Task<int> Main()
     {
@@ -198,12 +205,12 @@ internal static class Program
     {
         var client = new HttpClient
         {
-            BaseAddress = new Uri($"http://{HostName}:{ManagementPort}/api/"),
+            BaseAddress = new UriBuilder("http", HostName, ManagementPort, "/api/").Uri,
             Timeout = TimeSpan.FromSeconds(10),
         };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic",
-            Convert.ToBase64String(Encoding.ASCII.GetBytes($"{UserName}:{Password}")));
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{UserName}:{Password}")));
         return client;
     }
 

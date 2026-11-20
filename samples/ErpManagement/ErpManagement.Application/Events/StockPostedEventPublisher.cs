@@ -1,38 +1,43 @@
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
-using CrestCreates.Runtime.Delivery.Abstractions.Stores;
-using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using ErpManagement.Application.Contracts.Events;
-using ErpManagement.Application.Contracts.Json;
 using ErpManagement.Domain.Entities;
-using ErpManagement.Domain.Shared.Constants;
 
 namespace ErpManagement.Application.Events;
 
-/// <summary>
-/// Appends the StockPosted integration event to the transactional outbox. The MessageId is a
-/// stable idempotency key per receipt so a resend after a failed emission window converges.
-/// The caller marks <c>StockEventEmittedAt</c> and saves the receipt after this returns.
-/// </summary>
-public sealed class StockPostedEventPublisher(
-    IOutboxMessageFactory messageFactory,
-    ITransactionalOutboxWriter outboxWriter,
-    IRuntimeTransactionCoordinator transactionCoordinator)
+public interface IErpOutboxAppender
 {
+    ValueTask AppendAsync(OutboxMessage message, CancellationToken cancellationToken);
+}
+
+public interface IErpGoodsReceiptDelivery
+{
+    Task<ErpDeliveryStatus?> GetAsync(Guid tenantId, Guid receiptId, CancellationToken cancellationToken);
+    Task<ErpDeliveryStatus?> RetryAsync(Guid tenantId, Guid receiptId, CancellationToken cancellationToken);
+}
+
+public sealed record ErpDeliveryStatus(string Status, int AttemptCount, bool Consumed, string? FailureCode);
+
+public sealed class StockPostedEventPublisher(IOutboxMessageFactory messageFactory, IErpOutboxAppender appender)
+{
+    public static string GetMessageId(Guid receiptId) => $"erp.stock-posted:{receiptId}";
+
     public async Task PublishAsync(
         GoodsReceipt receipt,
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        var postedAt = receipt.PostedAt ?? throw new InvalidOperationException("The receipt has not been posted.");
+        var messageId = GetMessageId(receipt.Id);
         var tenantId = receipt.TenantId == Guid.Empty ? null : receipt.TenantId.ToString();
         var payload = new StockPostedEvent
         {
-            EventId = Guid.NewGuid().ToString("N"),
+            MessageId = messageId,
+            EventId = receipt.Id.ToString("N"),
             ReceiptId = receipt.Id,
             PurchaseOrderId = purchaseOrder.Id,
             SupplierId = receipt.SupplierId,
             TenantId = tenantId,
-            Lines = receipt.Lines.Select(line => new StockPostedLine
+            Lines = receipt.Lines.OrderBy(line => line.Id).Select(line => new StockPostedLine
             {
                 MaterialId = line.MaterialId,
                 WarehouseId = receipt.WarehouseId,
@@ -40,28 +45,32 @@ public sealed class StockPostedEventPublisher(
                 Quantity = line.Quantity,
                 UnitPrice = line.UnitPrice
             }).ToList(),
-            PostedAt = receipt.PostedAt ?? now
+            PostedAt = postedAt
         };
 
+        await AppendAsync(payload, ErpIntegrationWire.StockPostedId, ErpIntegrationWire.StockPosted,
+            receipt.Id, cancellationToken);
+    }
+
+    public ValueTask AppendAsync<TEvent>(TEvent payload, string contractId, string eventName,
+        Guid correlationId, CancellationToken cancellationToken) where TEvent : IErpIntegrationEvent
+    {
+        var occurredAt = new DateTimeOffset(payload.OccurredOn);
         var metadata = new OutboxMessageMetadata
         {
-            MessageId = $"erp.stock-posted:{receipt.Id}",
-            TenantId = tenantId,
-            ContractId = ErpContractIds.StockPostedContractId,
-            PayloadTypeId = ErpContractIds.StockPostedContractId,
-            EventName = "StockPosted",
-            EventVersion = 1,
-            RequiredConsumerIds = new[] { ErpContractIds.StockPostedConsumerId },
-            OccurredAt = now,
-            CreatedAt = now,
-            CorrelationId = receipt.Id.ToString()
+            MessageId = payload.MessageId,
+            TenantId = payload.TenantKey,
+            ContractId = contractId,
+            PayloadTypeId = contractId,
+            EventName = eventName,
+            EventVersion = ErpIntegrationWire.Version,
+            RequiredConsumerIds = [],
+            OccurredAt = occurredAt,
+            CreatedAt = occurredAt,
+            CorrelationId = correlationId.ToString()
         };
 
-        await transactionCoordinator.ExecuteAsync(async innerCt =>
-        {
-            await outboxWriter.AppendAsync(
-                messageFactory.Create(metadata, payload, ErpEventJsonContext.Default.StockPostedEvent),
-                innerCt).ConfigureAwait(false);
-        }, cancellationToken).ConfigureAwait(false);
+        return appender.AppendAsync(messageFactory.Create(metadata, payload, ErpIntegrationWire.GetJsonTypeInfo<TEvent>()),
+            cancellationToken);
     }
 }

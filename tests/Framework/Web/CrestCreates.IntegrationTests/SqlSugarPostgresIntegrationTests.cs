@@ -12,15 +12,15 @@ using CrestCreates.MultiTenancy.Abstract;
 using Moq;
 using Npgsql;
 using SqlSugar;
-using Testcontainers.PostgreSql;
+using CrestCreates.TestServices;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
 public sealed class SqlSugarPostgresIntegrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("crest_sqlsugar_test").WithUsername("test").WithPassword("test").Build();
+    private readonly string _postgres = ExternalTestServices.RequiredConnectionString(
+        "CREST_ERP_TEST_PG_CONNECTION", "PostgreSQL 16");
     private readonly string _schema = $"itest_{Guid.NewGuid():N}";
     private readonly List<Statement> _statements = new();
     private SqlSugarClient _client = null!;
@@ -28,8 +28,7 @@ public sealed class SqlSugarPostgresIntegrationTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
+        await using var connection = new NpgsqlConnection(_postgres);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"CREATE SCHEMA \"{_schema}\"";
@@ -37,7 +36,7 @@ public sealed class SqlSugarPostgresIntegrationTests : IAsyncLifetime
         _client = new SqlSugarClient(new ConnectionConfig
         {
             DbType = SqlSugar.DbType.PostgreSQL,
-            ConnectionString = $"{_postgres.GetConnectionString()};Search Path={_schema}",
+            ConnectionString = $"{_postgres};Search Path={_schema}",
             IsAutoCloseConnection = true
         });
         _client.CodeFirst.InitTables<SoftRow>();
@@ -50,7 +49,11 @@ public sealed class SqlSugarPostgresIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _client?.Dispose();
-        await _postgres.DisposeAsync();
+        await using var connection = new NpgsqlConnection(_postgres);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DROP SCHEMA IF EXISTS \"{_schema}\" CASCADE";
+        await command.ExecuteNonQueryAsync();
     }
 
     [Theory]

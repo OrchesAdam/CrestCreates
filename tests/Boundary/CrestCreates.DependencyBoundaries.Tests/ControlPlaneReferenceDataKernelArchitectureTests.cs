@@ -6,11 +6,11 @@ using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.TestServices;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.DependencyBoundaries.Tests;
@@ -355,39 +355,18 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
 }
 
 // ── C07 / O15 ──────────────────────────────────────────────────
-// Requires PostgreSQL (Testcontainers or CREST_RUNTIME_PG_CONNECTION).
+// Requires PostgreSQL (CREST_RUNTIME_PG_CONNECTION, long-lived test instance).
 // Kept inside the evidence collection so the ledger gate observes its tuples.
 
 public class OrganizationSchemaFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer? _container;
     public string ConnectionString { get; private set; } = "";
     public string Schema { get; } = $"itest_{Guid.NewGuid():N}";
 
-    public OrganizationSchemaFixture()
-    {
-        var external = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION");
-        if (string.IsNullOrWhiteSpace(external))
-        {
-            _container = new PostgreSqlBuilder("postgres:16-alpine")
-                .WithDatabase("crest_cp_org_fk_test")
-                .WithUsername("crest")
-                .WithPassword("crest")
-                .Build();
-        }
-    }
-
     public async Task InitializeAsync()
     {
-        if (_container is not null)
-        {
-            await _container.StartAsync();
-            ConnectionString = _container.GetConnectionString();
-        }
-        else
-        {
-            ConnectionString = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION")!;
-        }
+        ConnectionString = ExternalTestServices.RequiredConnectionString(
+            "CREST_RUNTIME_PG_CONNECTION", "PostgreSQL 16");
 
         var options = new PostgreSqlRuntimePersistenceOptions
         {
@@ -405,8 +384,6 @@ public class OrganizationSchemaFixture : IAsyncLifetime
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand($"drop schema if exists \"{Schema}\" cascade;", connection);
         await command.ExecuteNonQueryAsync();
-        if (_container is not null)
-            await _container.DisposeAsync();
     }
 }
 

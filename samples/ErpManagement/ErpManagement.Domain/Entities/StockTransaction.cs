@@ -15,11 +15,12 @@ public class StockTransaction : AuditedEntity<Guid>
     public StockMovementType MovementType { get; private set; }
     public string SourceDocType { get; private set; } = string.Empty;
     public Guid SourceDocId { get; private set; }
+    public Guid? SourceOperationId { get; private set; }
     public Guid TenantId { get; private set; }
 
     protected StockTransaction() { }
 
-    public StockTransaction(Guid id, Guid materialId, Guid warehouseId, Guid storageLocationId, decimal signedQuantity, decimal balanceAfter, StockMovementType movementType, string sourceDocType, Guid sourceDocId, Guid tenantId)
+    public StockTransaction(Guid id, Guid materialId, Guid warehouseId, Guid storageLocationId, decimal signedQuantity, decimal balanceAfter, StockMovementType movementType, string sourceDocType, Guid sourceDocId, Guid tenantId, Guid? sourceOperationId = null)
     {
         Id = id;
         MaterialId = materialId;
@@ -29,8 +30,18 @@ public class StockTransaction : AuditedEntity<Guid>
         SignedQuantity = signedQuantity;
         BalanceAfter = balanceAfter;
         MovementType = movementType;
-        SourceDocType = string.IsNullOrWhiteSpace(sourceDocType) ? throw new ArgumentException("Source doc type required", nameof(sourceDocType)) : sourceDocType;
+        ValidateSource(sourceDocType, sourceDocId);
+        SourceDocType = sourceDocType;
         SourceDocId = sourceDocId;
+        SourceOperationId = sourceOperationId;
         TenantId = tenantId;
+    }
+
+    internal static void ValidateSource(string sourceDocType, Guid sourceDocId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceDocType) || sourceDocType.Length > 32)
+            throw new ArgumentException("Source document type must be 1..32 characters.", nameof(sourceDocType));
+        if (sourceDocId == Guid.Empty)
+            throw new ArgumentException("Source document ID is required.", nameof(sourceDocId));
     }
 }

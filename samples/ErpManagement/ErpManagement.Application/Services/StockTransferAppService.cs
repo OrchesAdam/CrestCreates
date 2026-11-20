@@ -115,7 +115,7 @@ public class StockTransferAppService
         }
 
         await _stockPostingManager.PostAsync(
-            CurrentTenantId, movements, allowNegativeStock, "StockTransfer", transfer.Id, cancellationToken);
+            CurrentTenantId, movements, allowNegativeStock, nameof(StockTransfer), transfer.Id, cancellationToken);
 
         transfer.Post();
         await SetModificationAuditPropertiesAsync(transfer);

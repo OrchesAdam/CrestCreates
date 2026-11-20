@@ -13,10 +13,12 @@ public partial class ArApLedgerDto
 
 public sealed class WorkOrderReportInput
 {
+    public Guid OperationId { get; set; }
     public decimal ReportedQuantity { get; set; }
 }
 
 public sealed class SettlementInput
 {
+    public Guid OperationId { get; set; }
     public decimal Amount { get; set; }
 }

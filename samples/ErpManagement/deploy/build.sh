@@ -14,7 +14,7 @@ DOTNET="$DOTNET_ROOT/dotnet"
 RUNTIME="${CONTAINER_RUNTIME:-podman}"
 
 echo "[1/4] Build frontend (Vite -> ErpManagement.Web/wwwroot)"
-(cd erp-web && npm install --no-audit --no-fund && npm run build)
+(cd erp-web && npm ci --no-audit --no-fund && npm run build)
 
 echo "[2/4] Publish backend (framework-dependent, portable, no trim)"
 "$DOTNET" publish ErpManagement.Web/ErpManagement.Web.csproj \
@@ -23,11 +23,9 @@ echo "[2/4] Publish backend (framework-dependent, portable, no trim)"
   -o deploy/publish -m:1 -p:UseSharedCompilation=false
 
 echo "[3/4] Generate localhost development TLS certificate"
-"$DOTNET" dev-certs https -ep deploy/erp-dev.pfx -p erp-dev-cert --trust \
-  || "$DOTNET" dev-certs https -ep deploy/erp-dev.pfx -p erp-dev-cert
+"$DOTNET" dev-certs https -ep deploy/erp-dev.pfx -p erp-dev-cert
 
 echo "[4/4] Build app image with ${RUNTIME}"
-(cd deploy && "$RUNTIME" build -t erp-management:latest .)
+(cd deploy && "$RUNTIME" build -t "${ERP_APP_IMAGE:-erp-management:latest}" .)
 
-echo "Done. Start the stack from deploy/: 'docker compose up -d' or 'podman-compose up -d'."
-echo "Then open https://localhost:8443 (admin / ErpDemo#2026)."
+echo "Done. Set the deployment credentials described in deploy/README.md, then run Compose from deploy/."

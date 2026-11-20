@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../ErpManagement.Domain.Shared/ErpManagement.Domain.Shared.csproj" />

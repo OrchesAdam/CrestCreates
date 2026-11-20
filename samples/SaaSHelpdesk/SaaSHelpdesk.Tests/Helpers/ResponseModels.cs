@@ -120,9 +120,10 @@ public sealed class TicketDto
     public Guid Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public int Status { get; set; }
-    public int Priority { get; set; }
-    public int Type { get; set; }
+    // The formal generated JSON contract serializes enums as names (UseStringEnumConverter).
+    public string Status { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
     public Guid CustomerId { get; set; }
     public Guid? AssigneeId { get; set; }
     public Guid? CategoryId { get; set; }

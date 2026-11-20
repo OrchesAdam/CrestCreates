@@ -128,7 +128,7 @@ public class TicketWireBaselineTests : BaseTest
         var close = await client.GetAsync($"/api/ticket/close?id={ticketId}");
         close.StatusCode.Should().Be(HttpStatusCode.OK);
         using var closedDocument = JsonDocument.Parse(await close.Content.ReadAsStringAsync());
-        closedDocument.RootElement.GetProperty("data").GetProperty("status").GetInt32().Should().Be(6);
+        closedDocument.RootElement.GetProperty("data").GetProperty("status").GetString().Should().Be("Closed");
 
         var resolveAgain = await client.GetAsync($"/api/ticket/resolve?id={ticketId}");
         resolveAgain.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -147,7 +147,7 @@ public class TicketWireBaselineTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var data = document.RootElement.GetProperty("data");
-        data.GetProperty("status").GetInt32().Should().Be(2);
+        data.GetProperty("status").GetString().Should().Be("InProgress");
         data.GetProperty("assigneeId").ValueKind.Should().Be(JsonValueKind.String);
         data.GetProperty("dueDate").ValueKind.Should().Be(JsonValueKind.Null);
     }

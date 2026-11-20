@@ -18,9 +18,6 @@
     </PackageReference>
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Testcontainers" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
-    <PackageReference Include="Testcontainers.RabbitMq" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +25,7 @@
     <ProjectReference Include="../../../../src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj" />
     <ProjectReference Include="../../../../src/Integrations/CrestCreates.Integration.Cap.EfCore/CrestCreates.Integration.Cap.EfCore.csproj" />
     <ProjectReference Include="../../../../src/Persistence/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="../../../Shared/CrestCreates.TestServices/CrestCreates.TestServices.csproj" />
   </ItemGroup>
 
 </Project>

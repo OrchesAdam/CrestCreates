@@ -17,11 +17,11 @@ using CrestCreates.Generated.CrestCreates_GeneratedCrud_AotFixture_Feature;
 using CrestCreates.GeneratedCrud.AotFixture.Domain;
 using CrestCreates.GeneratedCrud.AotFixture.Feature.Widgets;
 using CrestCreates.GeneratedCrud.AotFixture.Feature.Widgets.Contracts;
+using CrestCreates.TestServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.GeneratedCrud.AotFixture.Tests;
@@ -117,32 +117,37 @@ public sealed class GeneratedCrudEfCoreRelationalTests : IDisposable
     [Fact]
     public async Task Q01_generated_crud_filters_execute_on_postgresql()
     {
-        await using var container = new PostgreSqlBuilder()
-            .WithImage("postgres:16-alpine")
-            .Build();
-        await container.StartAsync();
+        var server = ExternalTestServices.RequiredConnectionString(
+            "CREST_GENERATED_CRUD_TEST_PG_CONNECTION", "PostgreSQL 16");
+        var connectionString = await ExternalTestServices.CreateIsolatedDatabaseAsync(server, "crud");
+        try
+        {
+            await using var provider = BuildProvider(connectionString);
+            await using var scope = provider.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<WidgetDbContext>();
+            await context.Database.EnsureCreatedAsync();
+            await SeedAsync(context);
 
-        await using var provider = BuildProvider(container.GetConnectionString());
-        await using var scope = provider.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<WidgetDbContext>();
-        await context.Database.EnsureCreatedAsync();
-        await SeedAsync(context);
+            var service = scope.ServiceProvider.GetRequiredService<WidgetAppService>();
+            var request = BuildRequest();
 
-        var service = scope.ServiceProvider.GetRequiredService<WidgetAppService>();
-        var request = BuildRequest();
+            _sql.Clear();
+            var result = await service.GetListAsync(request);
 
-        _sql.Clear();
-        var result = await service.GetListAsync(request);
-
-        Assert.Equal(2, result.TotalCount);
-        Assert.Single(result.Items);
-        Assert.Equal("alpha", result.Items[0].Name);
-        Assert.Contains(_sql, sql =>
-            sql.Contains("SELECT", StringComparison.OrdinalIgnoreCase) &&
-            sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase) &&
-            sql.Contains("Price", StringComparison.Ordinal) &&
-            sql.Contains("CreationTime", StringComparison.Ordinal) &&
-            sql.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(2, result.TotalCount);
+            Assert.Single(result.Items);
+            Assert.Equal("alpha", result.Items[0].Name);
+            Assert.Contains(_sql, sql =>
+                sql.Contains("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase) &&
+                sql.Contains("Price", StringComparison.Ordinal) &&
+                sql.Contains("CreationTime", StringComparison.Ordinal) &&
+                sql.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            await ExternalTestServices.DropDatabaseAsync(server, ExternalTestServices.DatabaseName(connectionString));
+        }
     }
 
     [Fact]

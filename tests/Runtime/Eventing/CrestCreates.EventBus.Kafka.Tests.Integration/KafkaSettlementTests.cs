@@ -16,7 +16,7 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
 {
     private async Task<string> CreateTopicAsync(bool logAppendTime = false)
     {
-        var topic = "settlement-" + Guid.NewGuid().ToString("N");
+        var topic = TrackTopic("settlement-" + Guid.NewGuid().ToString("N"));
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = Options.BootstrapServers }).Build();
         await admin.CreateTopicsAsync(new[] { new TopicSpecification
         {
@@ -33,6 +33,7 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
         string suffix = ".dlq", bool missingType = false, int retryCount = 0)
     {
         var builder = Host.CreateApplicationBuilder();
+        TrackTopic(topic + suffix);
         builder.Services.AddKafkaEventBus(TestKafkaSerializerContext.Default, o =>
         {
             o.BootstrapServers = Options.BootstrapServers; o.ConsumerGroupId = group;

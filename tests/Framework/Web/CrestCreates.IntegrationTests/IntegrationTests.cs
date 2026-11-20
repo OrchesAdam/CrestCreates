@@ -260,6 +260,14 @@ public class IntegrationTests : IClassFixture<ErpManagementWebApplicationFactory
         var client = CreateTenantClient(tenantId);
         var loginResult = await LoginAsync(client, userName, password, tenantId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
+
+        // "host" 名称会解析为宿主租户实体帧；宿主管理操作（Feature/租户管理）要求真正的宿主帧
+        // （Tenant == null），与 FeatureManagementIntegrationTests 的宿主客户端约定一致。
+        if (tenantId == HostTenantId)
+        {
+            client.DefaultRequestHeaders.Remove("X-Tenant-Id");
+        }
+
         return (client, loginResult);
     }
 

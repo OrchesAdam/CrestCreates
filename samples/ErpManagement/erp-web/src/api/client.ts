@@ -26,12 +26,42 @@ export function clearTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+export function parseJwt(token: string): Record<string, string> {
+  try {
+    const payload = token.split('.')[1];
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
+}
+
+export function tokenUserId(token: string | null): string | undefined {
+  if (!token) return undefined;
+  const claims = parseJwt(token);
+  return claims.sub ?? claims.nameidentifier;
+}
+
+declare module 'axios' {
+  interface AxiosRequestConfig<D = any, P = any> {
+    erpOperationUserId?: string;
+    erpOperationTenantId?: string | null;
+  }
+}
+
 export const api = axios.create({ baseURL: '/' });
 
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
+  if (config.erpOperationUserId && tokenUserId(token) !== config.erpOperationUserId) {
+    throw new Error('登录用户已变更，请重新打开页面。');
+  }
+  if (config.erpOperationUserId && config.erpOperationTenantId !== null &&
+      parseJwt(token!).tenantid !== config.erpOperationTenantId) {
+    throw new Error('登录用户已变更，请重新打开页面。');
+  }
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  config.headers['X-Tenant-Id'] = getTenantId();
+  config.headers.set('X-Tenant-Id', config.erpOperationUserId ? config.erpOperationTenantId : getTenantId(), false);
   return config;
 });
 

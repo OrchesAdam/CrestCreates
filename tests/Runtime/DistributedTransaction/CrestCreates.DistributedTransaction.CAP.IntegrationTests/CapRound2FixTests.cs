@@ -17,6 +17,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 /// 最终存储覆盖（ConnectionString / DataSource）负例、提交派发阶段 Unknown（未提交与确认丢失两种事实）、
 /// broker 提交期离线恢复、拒绝矩阵补全（ResourceMismatch / NoTransactionAssociation）。
 /// </summary>
+[Collection("CapLongLivedServices")]
 public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
 {
     private static readonly TimeSpan ScanWait = TimeSpan.FromSeconds(150);

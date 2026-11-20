@@ -15,32 +15,27 @@ jobs:
     # Bounded job budget: the full suite plus the native publish/link/run gates
     # must fail explicitly instead of hanging a PR indefinitely.
     timeout-minutes: 120
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: crest_asset_management
-          POSTGRES_USER: crest
-          POSTGRES_PASSWORD: crest
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U crest -d crest_asset_management"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      rabbitmq:
-        image: rabbitmq:4.0-management-alpine
-        ports:
-          - 5672:5672
-          - 15672:15672
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     env:
-      ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest
+      ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: &shared-pg 'Host=127.0.0.1;Port=5432;Database=crest_test;Username=test;Password=test'
+      CREST_RUNTIME_PG_CONNECTION: *shared-pg
+      CREST_GENERATED_CRUD_TEST_PG_CONNECTION: *shared-pg
+      CREST_ERP_TEST_PG_CONNECTION: *shared-pg
+      CREST_ERP_TEST_AMQP_CONNECTION: 'amqp://test:test@127.0.0.1:5672/'
+      CREST_ERP_TEST_RABBIT_CONTAINER: crest-test-rabbitmq
+      CREST_CAP_TEST_PG_CONNECTION: 'Host=127.0.0.1;Port=5433;Database=cap_test;Username=test;Password=test'
+      CREST_CAP_TEST_PG_CONTAINER: crest-test-cap-pg
+      CREST_CAP_TEST_AMQP_CONNECTION: 'amqp://test:test@127.0.0.1:5673/'
+      CREST_CAP_TEST_RABBIT_CONTAINER: crest-test-cap-rabbitmq
+      CREST_HEALTH_TEST_PG_CONNECTION: 'Host=127.0.0.1;Port=5434;Database=health_test;Username=test;Password=test'
+      CREST_HEALTH_TEST_PG_CONTAINER: crest-test-health-pg
+      CREST_HEALTH_TEST_REDIS_ENDPOINT: '127.0.0.1:6379'
+      CREST_HEALTH_TEST_REDIS_CONTAINER: crest-test-health-redis
+      CREST_RABBITMQ_HOST: '127.0.0.1'
+      CREST_RABBITMQ_PORT: '5672'
+      CREST_RABBITMQ_MGMT_PORT: '15672'
+      CREST_RABBITMQ_USER: test
+      CREST_RABBITMQ_PASSWORD: test
+      CREST_TEST_CONTAINER_CLI: docker
 
     steps:
       - name: Checkout
@@ -55,6 +50,11 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
+
+      - name: Start external test services
+        run: >-
+          timeout 240s docker compose -p crest-test-services -f infra/docker-compose.test-services.yml
+          up -d --wait --wait-timeout 180 pg16 rabbitmq cap-pg cap-rabbitmq health-pg redis
 
       - name: Restore
         run: dotnet restore CrestCreates.slnx
@@ -132,7 +132,7 @@ jobs:
       # exclusions are removed: these tests are rewritten to the new clean-REST contract
       # (proper verbs, plural prefixes, string enums) and run in full. OIDC short-name
       # claims (name/email) are now emitted by IdentityClaimsBuilder, so LoginAndRefresh runs.
-      - name: Test — Integration suite (auth / tenant / permission / audit / UoW, Testcontainers)
+      - name: Test — Integration suite (auth / tenant / permission / audit / UoW / health)
         run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build
 
       - name: Test — Framework / Modules
@@ -198,8 +198,7 @@ jobs:
           dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
 
       # PostgreSQL contract, crash-window, retention and NativeAOT fixture tests use
-      # Testcontainers (PostgreSQL 16) and are required evidence for the direct Npgsql
-      # provider. GitHub-hosted ubuntu-latest runners provide a Docker daemon.
+      # the shared PostgreSQL 16 service and are required evidence for the direct Npgsql provider.
       - name: Test — Persistence / PostgreSQL direct Npgsql provider
         run: |
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
@@ -245,7 +244,7 @@ jobs:
           dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
 
-      - name: Test — Runtime / CAP atomic publish (PostgreSQL + RabbitMQ Testcontainers)
+      - name: Test — Runtime / CAP atomic publish (dedicated PostgreSQL and RabbitMQ)
         run: |
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP.IntegrationTests --no-build
         # #125: real PG + RabbitMQ fault matrix (scan-recovery delivery, rollback holds no

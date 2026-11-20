@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Core.Abstractions.Threading;
 
+// semantic-string-guard: allow — fixture-only round-trip literals asserting the official semantic identity values.
 namespace CrestCreates.Core.AotHost;
 
 /// <summary>

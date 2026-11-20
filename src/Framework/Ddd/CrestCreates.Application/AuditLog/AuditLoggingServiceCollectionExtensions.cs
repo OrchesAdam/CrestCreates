@@ -17,7 +17,6 @@ public static class AuditLoggingServiceCollectionExtensions
     {
         services.TryAddScoped<IAuditLogAppService, AuditLogAppService>();
         services.TryAddEnumerable(ServiceDescriptor.Transient<IPermissionDefinitionProvider, AuditLogQueryPermissionDefinitionProvider>());
-        services.AddAuditRetentionApplication();
         return services;
     }
 }

@@ -490,12 +490,203 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Nullable_scalar_root_from_another_contribution_requires_equivalent_underlying_metadata(bool changed)
+    {
+        // The retention HTTP shape: another activated contribution answers the nullable query root first.
+        var capA = CreateCapability("nullable-a.cap");
+        var capB = CreateCapability("nullable-b.cap");
+        var epA = CreateEndpoint("nullable-a.endpoint", capA.Id, "/nullable-a");
+        var epB = CreateEndpoint("nullable-b.endpoint", capB.Id, "/nullable-b");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(CreateCapabilityRegistryMock(capA, capB).Object);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        services.Configure<JsonOptions>(options =>
+        {
+            if (changed)
+            {
+                options.SerializerOptions.Converters.Add(new NullableUnderlyingIntConverter());
+            }
+
+            options.SerializerOptions.TypeInfoResolver =
+                JsonTypeInfoResolver.Combine(NullableScalarForeignContext.Default, NullableScalarOwnedContext.Default);
+        });
+        services.AddCrestCapabilityEndpointContribution(new NullableRootOwnerContribution
+        {
+            OwnerAssemblyName = "RetentionFeature",
+            CapabilityDescriptors = new[] { capA }, EndpointDescriptors = new[] { epA },
+            Bindings = new[] { CreateBinding(epA.Id) },
+            Handlers = new[] { CreateHandler(capA.Id) },
+            ResultMappers = new[] { CreateResultBinding(epA.Id, "nullable-a") },
+            JsonContext = NullableScalarOwnedContext.Default,
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(int?), "GetList", "Input") },
+        });
+        services.AddCrestCapabilityEndpointContribution(new NullableRootForeignContribution
+        {
+            OwnerAssemblyName = "BusinessFeature",
+            CapabilityDescriptors = new[] { capB }, EndpointDescriptors = new[] { epB },
+            Bindings = new[] { CreateBinding(epB.Id) },
+            Handlers = new[] { CreateHandler(capB.Id) },
+            ResultMappers = new[] { CreateResultBinding(epB.Id, "nullable-b") },
+            JsonContext = NullableScalarForeignContext.Default,
+            // The foreign contribution declares its own roots, so its context is an activated
+            // host context — exactly the retention/business-host shape that produced the defect.
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(int?), "Search", "Input") },
+        });
+        using var sp = services.BuildServiceProvider();
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        var options = sp.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        FirstAnsweringResolver(options, typeof(int?)).Should().BeSameAs(NullableScalarForeignContext.Default,
+            "the foreign contributed context must really answer first, otherwise the test proves nothing");
+
+        AssertGeneratedNullableIntWire(NullableScalarForeignContext.Default, options, changed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (changed)
+        {
+            map.Should().Throw<InvalidOperationException>()
+                .WithMessage("*RetentionFeature*GetList*underlying scalar 'System.Int32'*");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+        else
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().HaveCount(2);
+        }
+    }
+
+    [Theory]
+    [InlineData("canonical-host")]
+    [InlineData("modified-underlying")]
+    [InlineData("modified-wrapper")]
+    [InlineData("reflection")]
+    public void Nullable_scalar_root_from_a_non_contributed_context_must_match_the_owned_contract(string mode)
+    {
+        var contribution = new WiredContractContribution
+        {
+            OwnerAssemblyName = "NullableFeature",
+            EndpointDescriptors = [CreateEndpoint("nullable-scalar.endpoint")],
+            Bindings = [CreateBinding("nullable-scalar.endpoint")],
+            Handlers = [CreateHandler("test-cap")],
+            ResultMappers = [CreateResultBinding("nullable-scalar.endpoint", "nullable-scalar")],
+            JsonContext = NullableScalarOwnedContext.Default,
+            RequiredJsonRootTypes = [new(typeof(int?), "GetList", "Input")]
+        };
+        IJsonTypeInfoResolver first = mode switch
+        {
+            "canonical-host" or "modified-underlying" => NullableScalarCanonicalHostContext.Default,
+            "modified-wrapper" => new NullableScalarModifiedHostContext(),
+            _ => new DefaultJsonTypeInfoResolver()
+        };
+        var (provider, endpoints) = BuildEndpointHost(CreateCapability(), contribution,
+            configureJson: options =>
+            {
+                if (mode == "modified-underlying")
+                {
+                    options.SerializerOptions.Converters.Add(new NullableUnderlyingIntConverter());
+                }
+
+                options.SerializerOptions.TypeInfoResolver =
+                    JsonTypeInfoResolver.Combine(first, NullableScalarOwnedContext.Default);
+            });
+        using var lifetime = (IDisposable)provider;
+        var options = provider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        FirstAnsweringResolver(options, typeof(int?)).Should().BeSameAs(first);
+        if (mode is "canonical-host" or "modified-underlying")
+        {
+            AssertGeneratedNullableIntWire(first, options, changed: mode == "modified-underlying");
+        }
+        else
+        {
+            var metadata = first.GetTypeInfo(typeof(int?), options)!;
+            JsonSerializer.Serialize((int?)5, metadata).Should().Be(mode == "modified-wrapper" ? "\"host:5\"" : "5");
+        }
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (mode == "canonical-host")
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().ContainSingle();
+        }
+        else
+        {
+            map.Should().Throw<InvalidOperationException>()
+                .WithMessage("*NullableFeature*GetList*underlying scalar 'System.Int32'*");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+    }
+
+    private static void AssertGeneratedNullableIntWire(
+        IJsonTypeInfoResolver resolver, JsonSerializerOptions options, bool changed)
+    {
+        var expected = NullableScalarOwnedContext.Default.GetTypeInfo(typeof(int?))!;
+        var actual = resolver.GetTypeInfo(typeof(int?), options)!;
+        actual.Converter.GetType().Should().Be(expected.Converter.GetType());
+        JsonSerializer.Serialize((int?)5, expected).Should().Be("5");
+        JsonSerializer.Serialize((int?)5, actual).Should().Be(changed ? "\"5\"" : "5");
+    }
+
+    [Fact]
+    public void Private_dto_root_answered_first_by_another_contributed_context_must_still_fail()
+    {
+        // Discriminating pair of the nullable-scalar fix: a feature-private DTO root keeps the exact
+        // owning-context rule even when the first answerer is another activated contributed context.
+        var capA = CreateCapability("private-a.cap");
+        var capB = CreateCapability("private-b.cap");
+        var epA = CreateEndpoint("private-a.endpoint", capA.Id, "/private-a");
+        var epB = CreateEndpoint("private-b.endpoint", capB.Id, "/private-b");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(CreateCapabilityRegistryMock(capA, capB).Object);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        services.Configure<JsonOptions>(options => options.SerializerOptions.TypeInfoResolver =
+            JsonTypeInfoResolver.Combine(PrivateRootForeignContext.Default, CrudWireProbeJsonContext.Default));
+        services.AddCrestCapabilityEndpointContribution(new PrivateRootOwnerContribution
+        {
+            OwnerAssemblyName = "PrivateFeature",
+            CapabilityDescriptors = new[] { capA }, EndpointDescriptors = new[] { epA },
+            Bindings = new[] { CreateBinding(epA.Id) },
+            Handlers = new[] { CreateHandler(capA.Id) },
+            ResultMappers = new[] { CreateResultBinding(epA.Id, "private-a") },
+            JsonContext = CrudWireProbeJsonContext.Default,
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(CrudWireProbeDto), "Create", "Body") },
+        });
+        services.AddCrestCapabilityEndpointContribution(new PrivateRootForeignContribution
+        {
+            OwnerAssemblyName = "OtherFeature",
+            CapabilityDescriptors = new[] { capB }, EndpointDescriptors = new[] { epB },
+            Bindings = new[] { CreateBinding(epB.Id) },
+            Handlers = new[] { CreateHandler(capB.Id) },
+            ResultMappers = new[] { CreateResultBinding(epB.Id, "private-b") },
+            JsonContext = PrivateRootForeignContext.Default,
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(CrudWireProbeDto), "Create", "Body") },
+        });
+        using var sp = services.BuildServiceProvider();
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        var options = sp.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        FirstAnsweringResolver(options, typeof(CrudWireProbeDto)).Should().BeSameAs(PrivateRootForeignContext.Default);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>().WithMessage("*feature-private*");
+        endpoints.DataSources.Should().BeEmpty();
+    }
+
     private sealed class Review150CapabilityProvider(CapabilityDescriptor descriptor) : IDescriptorProvider<CapabilityDescriptor>
     {
         public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => new[] { descriptor };
     }
     private sealed class Review150FirstContribution : CapabilityEndpointContribution;
     private sealed class Review150SecondContribution : CapabilityEndpointContribution;
+    private sealed class NullableRootOwnerContribution : CapabilityEndpointContribution;
+    private sealed class NullableRootForeignContribution : CapabilityEndpointContribution;
+    private sealed class PrivateRootOwnerContribution : CapabilityEndpointContribution;
+    private sealed class PrivateRootForeignContribution : CapabilityEndpointContribution;
 
     [Fact]
     public void Review150_prebuilt_capability_with_changed_permissions_must_reject()

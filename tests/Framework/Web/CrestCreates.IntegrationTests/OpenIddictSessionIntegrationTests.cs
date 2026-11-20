@@ -29,7 +29,7 @@ using Microsoft.IdentityModel.Tokens;
 using Moq;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
-using Testcontainers.PostgreSql;
+using CrestCreates.TestServices;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -42,8 +42,7 @@ public class OpenIddictSessionIntegrationTests
     [Fact]
     public async Task Persistent_keys_refresh_rotation_and_session_logout_use_the_official_chain()
     {
-        await using var database = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await database.StartAsync();
+        await using var database = await IsolatedDatabase.CreateAsync();
         using var signingRsa = RSA.Create(2048);
         using var encryptionRsa = RSA.Create(2048);
         using var nextSigningRsa = RSA.Create(2048);
@@ -55,7 +54,7 @@ public class OpenIddictSessionIntegrationTests
         var user = new User(Guid.NewGuid(), "alice", "alice@example.test", "tenant-a")
         { IsActive = true, IsSuperAdmin = true, PasswordHash = "fixture-hash" };
         var roles = new List<Role> { new(Guid.NewGuid(), "old-admin", "tenant-a") };
-        var connection = database.GetConnectionString();
+        var connection = database.ConnectionString;
         var calls = new IdentityCalls();
         await using var hostA = await StartHost(connection, user, roles, new[] { signing }, new[] { encryption }, initialize: true, calls: calls);
         using var clientA = Client(hostA);
@@ -134,8 +133,7 @@ public class OpenIddictSessionIntegrationTests
     [Fact]
     public async Task Mixed_certificate_RSA_rotation_rejects_expired_issuance_and_retains_historical_decryption()
     {
-        await using var database = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await database.StartAsync();
+        await using var database = await IsolatedDatabase.CreateAsync();
         using var oldRsa = RSA.Create(2048);
         using var currentRsa = RSA.Create(2048);
         var now = DateTimeOffset.UtcNow;
@@ -152,7 +150,7 @@ public class OpenIddictSessionIntegrationTests
         var user = new User(Guid.NewGuid(), "alice", "alice@example.test", "tenant-a")
         { IsActive = true, PasswordHash = "fixture-hash" };
         var roles = new List<Role>();
-        var connection = database.GetConnectionString();
+        var connection = database.ConnectionString;
         (string Access, string Refresh) original;
         // Issue the historical artifact while the very same certificate was valid; no wall-clock sleeps.
         await using (var oldHost = await StartHost(connection, user, roles, new SecurityKey[] { rsaKey },
@@ -199,8 +197,7 @@ public class OpenIddictSessionIntegrationTests
     [Fact]
     public async Task Refresh_rejects_changed_user_tenant_and_request_tenant_but_allows_host_in_host_context()
     {
-        await using var database = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await database.StartAsync();
+        await using var database = await IsolatedDatabase.CreateAsync();
         using var signingRsa = RSA.Create(2048);
         using var encryptionRsa = RSA.Create(2048);
         SecurityKey[] signing = { new RsaSecurityKey(signingRsa) { KeyId = "boundary-sign" } };
@@ -208,7 +205,7 @@ public class OpenIddictSessionIntegrationTests
         var user = new User(Guid.NewGuid(), "alice", "alice@example.test", "tenant-a")
         { IsActive = true, PasswordHash = "fixture-hash" };
         var roles = new List<Role>();
-        var connection = database.GetConnectionString();
+        var connection = database.ConnectionString;
         await using var tenantA = await StartHost(connection, user, roles, signing, encryption, initialize: true);
         using var clientA = Client(tenantA);
         var token = await Password(clientA);
@@ -335,4 +332,26 @@ public class OpenIddictSessionIntegrationTests
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
         return client.SendAsync(request);
     }
+}
+
+internal sealed class IsolatedDatabase : IAsyncDisposable
+{
+    private readonly string _server;
+
+    private IsolatedDatabase(string server, string connectionString)
+    {
+        _server = server;
+        ConnectionString = connectionString;
+    }
+
+    public string ConnectionString { get; }
+
+    public static async Task<IsolatedDatabase> CreateAsync()
+    {
+        var server = ExternalTestServices.RequiredConnectionString("CREST_ERP_TEST_PG_CONNECTION", "PostgreSQL 16");
+        return new IsolatedDatabase(server, await ExternalTestServices.CreateIsolatedDatabaseAsync(server, "oidc"));
+    }
+
+    public async ValueTask DisposeAsync()
+        => await ExternalTestServices.DropDatabaseAsync(_server, ExternalTestServices.DatabaseName(ConnectionString));
 }

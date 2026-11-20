@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace SaaSHelpdesk.Tests;
@@ -284,8 +285,9 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
     // ── User management helpers ────────────────────────────────────
 
     /// <summary>
-    /// Creates a new user via the Dynamic API and returns the parsed user
-    /// together with the raw JSON response.
+    /// Creates a new user via the formal platform management surface (POST /api/users) and returns
+    /// the parsed user together with the raw JSON response. Resolve the fixture's tenant name to its
+    /// entity Id before sending the payload because user creation requires the authoritative Id.
     /// </summary>
     protected async Task<(IdentityUserResponse User, string RawResponse)> CreateUserAsync(
         HttpClient adminClient,
@@ -294,24 +296,23 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
         string password,
         string tenantId,
         bool isSuperAdmin = false,
-        string? phone = null,
-        string? role = null)
+        string? phone = null)
     {
+        var resolvedTenantId = await ResolveTenantIdAsync(tenantId);
         var payload = new
         {
             userName,
             email,
             password,
             phone,
-            tenantId,
+            tenantId = resolvedTenantId,
             organizationId = (Guid?)null,
-            role,
             isSuperAdmin
         };
 
         var json = SerializeJson(payload);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
-        var response = await adminClient.PostAsync("/api/user", content);
+        var response = await adminClient.PostAsync("/api/users", content);
 
         var rawResponse = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(
@@ -321,5 +322,18 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
         var result = await ReadJsonAsync<DynamicApiResponse<IdentityUserResponse>>(response);
         result.Data.Should().NotBeNull();
         return (result.Data!, rawResponse);
+    }
+
+    private async Task<string> ResolveTenantIdAsync(string tenantIdOrName)
+    {
+        if (Guid.TryParse(tenantIdOrName, out _))
+        {
+            return tenantIdOrName;
+        }
+
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<SaaSHelpdesk.EntityFrameworkCore.HelpdeskDbContext>();
+        var tenant = await db.Tenants.AsNoTracking().SingleAsync(t => t.Name == tenantIdOrName);
+        return tenant.Id.ToString();
     }
 }
