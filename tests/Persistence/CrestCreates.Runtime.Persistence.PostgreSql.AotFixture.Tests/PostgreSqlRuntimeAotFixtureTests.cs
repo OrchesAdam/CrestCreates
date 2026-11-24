@@ -43,6 +43,8 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
             var execution = await RunScenarioAsync();
             execution.ExitCode.Should().Be(0, execution.Output);
+            execution.Output.Should().Contain("CRESTCREATES_AGENT_EXECUTION_PERSISTENCE_NATIVE_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");

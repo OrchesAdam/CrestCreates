@@ -41,8 +41,10 @@ using CrestCreates.Sample.AssetManagement.Application;
 using CrestCreates.Sample.AssetManagement.Application.Handlers;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Json;
+using CrestCreates.Sample.AssetManagement.Host.ApprovedReleases;
 using CrestCreates.Sample.AssetManagement.Host.Json;
 using CrestCreates.Sample.AssetManagement.Host.Projections;
+using CrestCreates.Sample.AssetManagement.Host.ProductionRelease;
 using CrestCreates.Sample.AssetManagement.Persistence;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
@@ -93,19 +95,44 @@ internal sealed class AssetHostModule : ModuleBase
             ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_SCHEMA")
             ?? "crest_asset_runtime";
 
+        var baseline = AssetApprovedRelease.GetBaseline();
+        IDescriptor[] productionBaseline =
+        [
+            ..baseline,
+            AssetDescriptorCatalog.MaintenanceInitialHumanTask,
+            ProductionRelease.AssetProductionDescriptors.TrialTask,
+            ProductionRelease.AssetProductionDescriptors.QualityTask,
+            ProductionRelease.AssetProductionDescriptors.ReleaseInputSchema,
+            ProductionRelease.AssetProductionDescriptors.ReleaseOutputSchema,
+            ProductionRelease.AssetProductionDescriptors.ReleaseCapability
+        ];
+        var receipt = _configuration[AssetApprovedRelease.ReceiptSetting];
+        if (receipt is not null && _candidateGoldenScenario)
+            throw new InvalidOperationException("An Asset approved release cannot be used with the candidate golden scenario.");
+        var release = receipt is null ? null : AssetApprovedRelease.Load(
+            receipt, _configuration[AssetApprovedRelease.SigningKeySetting], baseline);
+        var productionReceipt = _configuration[ProductionRelease.AssetProductionRelease.ReceiptSetting];
+        if (productionReceipt is not null && (receipt is not null || _candidateGoldenScenario))
+            throw new InvalidOperationException("An Asset production release cannot be combined with another release profile.");
+        var productionRelease = productionReceipt is null ? null : ProductionRelease.AssetProductionRelease.Load(
+            productionReceipt, _configuration[ProductionRelease.AssetProductionRelease.SigningKeySetting], productionBaseline);
+        IDescriptor[] inventory = productionRelease is not null
+            ? [..productionBaseline, productionRelease.Workflow]
+            : release is not null
+                ? [..baseline, release.InitialTask, release.Workflow]
+                : _candidateGoldenScenario
+                    ? [..baseline, AssetDescriptorCatalog.MaintenanceInitialHumanTask, AssetCandidateDescriptorCatalog.MaintenanceWorkflow]
+                    : baseline;
+
         var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
-        schemaRegistry.Build([new AssetDescriptorProvider<SchemaDescriptor>(AssetDescriptorCatalog.Schemas)]);
+        schemaRegistry.Build([new AssetDescriptorProvider<SchemaDescriptor>(inventory.OfType<SchemaDescriptor>().ToArray())]);
         var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
         var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
-        humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(_candidateGoldenScenario
-            ? [AssetDescriptorCatalog.MaintenanceHumanTask, AssetDescriptorCatalog.MaintenanceInitialHumanTask]
-            : [AssetDescriptorCatalog.MaintenanceHumanTask])]);
+        humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(inventory.OfType<HumanTaskDescriptor>().ToArray())]);
         var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-        workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>(_candidateGoldenScenario
-            ? [AssetDescriptorCatalog.MaintenanceWorkflow, AssetCandidateDescriptorCatalog.MaintenanceWorkflow]
-            : [AssetDescriptorCatalog.MaintenanceWorkflow])]);
+        workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>(inventory.OfType<WorkflowDescriptor>().ToArray())]);
         var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
-        formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>([AssetDescriptorCatalog.MaintenanceForm])]);
+        formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>(inventory.OfType<FormDescriptor>().ToArray())]);
 
         // Host policy choices own the framework defaults through the framework contributor contract.
         services.AddCapabilityInputValidationPolicy<AssetInputValidationPolicy>();
@@ -135,6 +162,16 @@ internal sealed class AssetHostModule : ModuleBase
         services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
         services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
         services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModule());
+        services.AddSingleton<CrestCreates.Metadata.Abstractions.DescriptorCapability.ICapabilityHandlerRegistry>(new AssetCapabilityHandlerRegistry());
+        services.AddSingleton<ICapabilityHandlerModule>(new ProductionRelease.AssetProductionCapabilityModule());
+        services.AddAssetMes(_configuration);
+        if (productionRelease is not null)
+        {
+            services.AddHostedService(sp => new AssetMesTrialEventWorker(
+                sp.GetRequiredService<IHttpClientFactory>(), _configuration, sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<ILogger<AssetMesTrialEventWorker>>(), productionRelease.TenantId));
+        }
+        services.AddSingleton(new AssetProductionRunEvidence(productionRelease));
         services.AddSingleton<IAssetStore>(_assetStore);
         services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();
         services.AddScoped<AssetApplicationService>();
@@ -153,20 +190,16 @@ internal sealed class AssetHostModule : ModuleBase
         services.AddSingleton<AssetMaintenanceTaskContractResolver>();
         services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
         services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceInitialHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
+        services.AddHumanTaskCompletionObligation(ProductionRelease.AssetProductionDescriptors.TrialTaskId, 1, AssetContractIds.MaintenanceDecisionConsumer);
+        services.AddHumanTaskCompletionObligation(ProductionRelease.AssetProductionDescriptors.QualityTaskId, 1, AssetContractIds.MaintenanceDecisionConsumer);
         services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, AssetMaintenanceDecisionConsumer>(AssetContractIds.MaintenanceDecisionConsumer);
         services.AddWorkflowEngine();
+        services.AddScoped<IAssetMaintenanceWorkflowVersionSelector>(sp =>
+            new AssetMaintenanceWorkflowVersionSelector(sp.GetRequiredService<IAssetStore>(), release, productionRelease));
         services.AddScoped<IAssetMaintenanceWorkflowStarter, AssetMaintenanceWorkflowService>();
         services.AddScoped<AssetMaintenanceWorkflowService>();
         services.AddScoped<ILocalEventBus, AssetLocalEventBus>();
-        services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(
-            AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
-                .Concat(AssetDescriptorCatalog.Capabilities)
-                .Append(AssetDescriptorCatalog.MaintenanceForm)
-                .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
-                .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
-                .Concat(_candidateGoldenScenario
-                    ? new IDescriptor[] { AssetDescriptorCatalog.MaintenanceInitialHumanTask, AssetCandidateDescriptorCatalog.MaintenanceWorkflow }
-                    : Array.Empty<IDescriptor>())));
+        services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(inventory));
         services.AddSingleton<ISchemaValidator, SchemaValidator>();
         services.AddHttpContextAccessor();
         services.AddAuthentication(AssetAuthenticationHandler.SchemeName)
@@ -196,7 +229,7 @@ internal sealed class AssetHostModule : ModuleBase
 
         // #129 S2.3: compose the host capability registry from its static catalog plus exactly the
         // generated contributions this host activated; mapping verifies the frozen result.
-        services.BuildFromHostCatalog(AssetDescriptorCatalog.Capabilities);
+        services.BuildFromHostCatalog([..AssetDescriptorCatalog.Capabilities, ProductionRelease.AssetProductionDescriptors.ReleaseCapability]);
 
         await SeedAssetPermissionsAsync(services);
         await _assetStore.InitializeAsync();
@@ -221,5 +254,9 @@ internal sealed class AssetHostModule : ModuleBase
             await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-user", Scope = PermissionGrantScope.Global });
         foreach (var permission in managerPermissions)
             await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-manager", Scope = PermissionGrantScope.Global });
+        foreach (var permission in userPermissions.Concat(new[] { AssetPermissions.Assets.CompleteMaintenance, AssetPermissions.Assets.ReleaseProduction }))
+            await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = ProductionRelease.AssetProductionDescriptors.QualityRole, Scope = PermissionGrantScope.Global });
+        foreach (var permission in userPermissions)
+            await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = ProductionRelease.AssetProductionDescriptors.MesEvidenceRole, Scope = PermissionGrantScope.Global });
     }
 }

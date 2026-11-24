@@ -320,7 +320,7 @@ public sealed class AssetApprovedInventoryHandoffAcceptanceTests
             }
         });
 
-    private static string CreateWorkflowUpdateJson(string promptHash, string intent)
+    internal static string CreateWorkflowUpdateJson(string promptHash, string intent)
         => JsonSerializer.Serialize(new
         {
             contractVersion = "8a.v1",

@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Orchestration;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Runtime.Persistence.Abstractions.Providers;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
@@ -51,6 +52,8 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IAuditSink, PostgreSqlAuditSink>();
 
         // Replace development participants with durable PostgreSQL participants
+        services.RemoveAll<IAgentExecutionStore>();
+        services.AddSingleton<IAgentExecutionStore, PostgreSqlAgentExecutionStore>();
         services.RemoveAll<IAgentToolGovernanceAuditor>();
         services.RemoveAll<IAgentToolBudgetGate>();
         services.RemoveAll<IAgentToolInvocationGate>();

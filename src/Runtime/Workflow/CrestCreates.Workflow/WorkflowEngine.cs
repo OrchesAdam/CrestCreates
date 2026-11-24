@@ -51,7 +51,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         string workflowId,
         IReadOnlyDictionary<string, RuntimeStateValue>? inputVariables = null,
         CancellationToken ct = default)
-        => await ExecuteCoreAsync(workflowId, null, inputVariables, null, null, ct).ConfigureAwait(false);
+        => await ExecuteCoreAsync(workflowId, null, null, inputVariables, null, null, ct).ConfigureAwait(false);
 
     public async Task<WorkflowInstance> ExecuteAsync(
         WorkflowExecutionRequest request,
@@ -60,6 +60,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         ArgumentNullException.ThrowIfNull(request);
         return await ExecuteCoreAsync(
             request.WorkflowId,
+            request.WorkflowVersion,
             request.TenantId,
             request.InputVariables,
             request.Origin,
@@ -69,15 +70,29 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
     private async Task<WorkflowInstance> ExecuteCoreAsync(
         string workflowId,
+        int? workflowVersion,
         string? tenantId,
         IReadOnlyDictionary<string, RuntimeStateValue>? inputVariables,
         AuditOrigin? explicitOrigin,
         string? requestedOperationId,
         CancellationToken ct)
     {
-        var descriptor = _registry.GetById(workflowId);
-        if (descriptor == null)
-            throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
+        var descriptor = workflowVersion is int version
+            ? _registry.GetByVersion(workflowId, version)
+            : _registry.GetById(workflowId);
+        if (descriptor is null)
+        {
+            throw new InvalidOperationException(workflowVersion is null
+                ? $"Workflow '{workflowId}' not found."
+                : $"Workflow '{workflowId}' version {workflowVersion} not found.");
+        }
+
+        if (workflowVersion is not null
+            && (descriptor.Version != workflowVersion || !string.Equals(descriptor.Id, workflowId, StringComparison.Ordinal)))
+        {
+            throw new RuntimeDescriptorPinValidationException(
+                $"Resolved workflow identity does not match '{workflowId}' version {workflowVersion}.");
+        }
 
         var conditionErrors = WorkflowConditionPolicy.ValidateDescriptor(descriptor);
         if (conditionErrors.Count != 0)

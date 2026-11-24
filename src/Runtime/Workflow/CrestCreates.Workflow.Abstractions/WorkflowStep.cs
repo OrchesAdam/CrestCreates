@@ -7,10 +7,11 @@ public sealed class WorkflowStep
     public InteractionTarget Target { get; init; } = null!;
 
     /// <summary>
-    /// Optional prerequisite token. <see langword="null"/> is unconditional;
-    /// the only supported values are <see cref="WorkflowConditionTokens.PreviousHumanTaskApproved"/>
-    /// and <see cref="WorkflowConditionTokens.PreviousHumanTaskRejected"/>. A token requires the
-    /// immediately preceding HumanTask to be durably completed; all other values are rejected.
+    /// Optional prerequisite token. <see langword="null"/> is unconditional.
+    /// Previous-task tokens require an unconditional, immediately preceding HumanTask.
+    /// <see cref="WorkflowConditionTokens.AllPriorHumanTasksApproved"/> requires at least one
+    /// predecessor, all HumanTask targets, and only approval-gated conditional predecessors.
+    /// All other values are rejected.
     /// </summary>
     public string? Condition { get; init; }
     public IReadOnlyList<string> Transitions { get; init; } = Array.Empty<string>();

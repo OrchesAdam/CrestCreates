@@ -6,5 +6,8 @@
     <AssemblyName>CrestCreates.Agent.Abstractions</AssemblyName>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Agent.Orchestration" />
+  </ItemGroup>
 
 </Project>

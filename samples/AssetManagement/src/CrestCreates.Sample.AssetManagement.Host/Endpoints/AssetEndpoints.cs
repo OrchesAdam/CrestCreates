@@ -44,4 +44,9 @@ public static partial class AssetEndpoints
     [CapabilityEndpointInput(typeof(MaintenanceRequestInput), Name = "body", Source = CapabilityEndpointParameterSource.Body)]
     [CapabilityEndpointInput(typeof(Guid), Name = "assetId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(MaintenanceRequestInput.AssetId))]
     public sealed partial class RequestMaintenance;
+
+    [CapabilityEndpointSpec(ProductionRelease.AssetProductionDescriptors.ReleaseCapabilityId, CapabilityEndpointHttpMethod.Post, "/api/assets/{assetId:guid}/production-release", SuccessStatusCode = 200, GroupName = "Asset Management", Tags = new[] { "Maintenance" })]
+    [CapabilityEndpointInput(typeof(AssetProductionReleaseInput), Name = "body", Source = CapabilityEndpointParameterSource.Body)]
+    [CapabilityEndpointInput(typeof(Guid), Name = "assetId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(AssetProductionReleaseInput.AssetId))]
+    public sealed partial class ReleaseProduction;
 }

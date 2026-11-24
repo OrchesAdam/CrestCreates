@@ -183,6 +183,19 @@
 
 S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并附准入记录（由 `CapabilityMapCoverageArchitectureTests` 强制）：为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一声明与装配路径、验证方式、支持级别、维护责任、未交付时的退出条件。缺记录即门禁失败。
 
+### CrestCreates.Agent.Orchestration 项目准入
+
+- 定位与依赖：Runtime Agent 原生调度执行层，引用既有 Agent.Abstractions。Agent.Tools 负责受治理的工具调用，Workflow 负责确定性业务流程，Control Plane 负责治理。跨 Agent 的预算预留、所有权转移与事件等待需要独立运行状态。
+- 装配与消费者：宿主显式创建 `AgentRunCoordinator` 并供应 `IAgentExecutionStore`。当前消费者为专用协调器测试，正式业务消费者为 AssetManagement 演进链路。
+- 状态与维护：Agent Runtime 负责。已实现的运行状态转移由 JIT 回归覆盖，PostgreSQL 持久化由 `PostgreSqlAgentExecutionStore` 与 V018 迁移承载，原生场景由 PostgreSQL AotHost 的 `CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK` 覆盖（2026-11-23 在 10.0.114 重新 publish/link/run：跨 epoch 收据经持久层保留，公共读取仅暴露当前 epoch；团队派遣经 store 原子 claim，未确认派遣要求 reconciliation）。正式业务消费者为 AssetManagement 关键设备复产链路。若业务纵切无法通过统一内核验证，收回该项目的正式交付声明。
+- 八种模式与真实模型证据（2026-11-24）：ReAct=`AgentReActRunner.RunAsync`；Plan-and-Execute=`SetPlanAsync` + `RunPlanAsync`；Sequential=`RunSequentialAsync`；Parallel=`RunParallelAsync`；Supervisor=`DelegateAsync`；Handoff/Swarm=`OfferHandoffAsync` + `AcceptHandoffAsync`；Group Chat=`RunDiscussionAsync`；Human-in-the-Loop=`WaitForEventAsync` + `ResumeAsync`。DeepSeek 真实模型 live **8/8**（JIT + `InMemoryAgentExecutionStore`，`CREST_AGENT_LIVE_EVAL=1`，单次串行，默认 4096 输出预算）：逐模式记录 HTTP 200/`stop`、usage、模型观测与持久快照；Parallel 以 transport barrier 实测 2 并发；Handoff 验证同 RunId/epoch+1/旧 owner fence/仅显式输入；HITL 验证 wait→durable event→resume→重复 resume 幂等；所有模式断言 Agent Returned 与 Workflow/Capability 空事实集分开。该 live 声明不外推 NativeAOT、PostgreSQL、真实认证/租户/权限或生产 SLA。
+
+### AssetManagement MES 与 Microsoft Agent 样例项目准入
+
+- `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Mes`：独立 MES 样例宿主，承载设备生产锁、试运行证据与幂等复产回执。它不是框架 Runtime 组件，消费者为 AssetManagement 关键设备复产验收与外部 MES 集成示例。
+- `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.MicrosoftAgent`：Microsoft Agent Framework 适配样例，隔离官方 SDK 依赖，实现 `IDescriptorAuthoringModelClient` 与只读专家工具调用。消费者为 AssetManagement 演进链路的互操作验收。
+- 两个样例项目均不进入框架核心依赖闭包；验证方式分别为 MES HTTP 测试、Microsoft Agent 适配器测试与 AssetManagement E2E。支持级别按实际执行的测试与原生门禁逐项声明。
+
 ## 4. 项目索引（active `src/**/*.csproj` 全量）
 
 固定索引区，由 `CapabilityMapCoverageArchitectureTests` 读取校验：集合与 `src/**/*.csproj` 一致、路径真实、无重复、无漏项。D-xx 行是本轮逐项裁定；「导航」行只建立路径与既有文档链接，**未在本轮重评**，其支持声明不由本地图背书。`tests/**`、`samples/**` 与 fixture/tool 项目按其作用在 §5 单列，不要求具备业务消费者。
@@ -268,6 +281,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
+| src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj | Runtime | 新增执行实现，见项目准入 | [AgentRunCoordinator](../../src/Runtime/Agent/CrestCreates.Agent.Orchestration/AgentRunCoordinator.cs) |
 | src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
@@ -386,7 +400,8 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | `CrestCreates.Agent.Authoring.Abstractions` | 抽象契约（`outcome` 判别式、`UnsupportedIntent`/`NeedsClarification` 两终态与载荷类型、两张闭码表、两枚诊断码、契约侧 JSON 根） | 已交付指定边界（`8a.v1`） | JIT：`CrestCreates.Agent.Authoring.Tests` 139/139（§10.1 全 23 行矩阵）；NativeAOT linux-x64：`AgentAuthoringUnsupportedOutcome` / `AgentAuthoringClarificationOutcome` 结构化往返（含读回状态） | 保留；新增终态必须同时进入词表、码表与 JSON 根闭包，不得留兼容旁路 |
 | `CrestCreates.Agent.Authoring` | 执行实现（Stage A 原始信封事实 + Stage B 严格 source-generated 投影 + 归一化/边界 + 提示披露 `descriptor-authoring-prompt-template-v3`） | 已交付指定边界（`8a.v1`） | JIT：同上 139/139；变异 (a)(b)(c)(d)(e)(f1)(f2) 各按所宣称机制打红；NativeAOT linux-x64：`AgentAuthoringOutcomeShapeConflict`、`AgentAuthoringCodeTableRejection`、`AgentAuthoringEnvelopeUnknownMember`、`AgentAuthoringEnvelopeDuplicatePrecedence`、`AgentAuthoringWireDisclosure`（四条披露示例逐条过正式 parser）；`AgentAuthoringOutcomeRequiredRoots` + `ReflectionFallback_IsDisabled` | 保留；Stage A 只拥有信封事实，禁止把 payload 内层字段名纳入词表；解码失败由执行读取的那一步报告，不新增优先级层 |
 | `CrestCreates.Agent.Authoring.Http` | Provider 适配（OpenAI-compatible 客户端） | 已交付指定边界（本片只迁移录制件与版本字面量） | JIT：`Authoring.Tests` 内 provider/录制件用例；原生：本切片未新增该项目的场景 | 保留；本片不据此项目推导原生 HTTP 认证/租户链 |
-| Asset 样例真实链路（`samples/AssetManagement/**/E2E.Tests`） | 消费者与治理证据（oracle 两层判定：新契约覆盖 vs 历史归因） | 已交付指定边界 | JIT + 本地 PG：Asset 全量 E2E **128 通过 / 2 跳过（共 130）**，跳过项为未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口；`AssetB12CoverageEntryTests` 常驻判别历史归因不得计为覆盖。带凭据 live（S5，单次、获准范围）：B12 不支持意图 → `UnsupportedIntent` + 3 条合法条目，oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审/零保存/零 gate、部署清单不变、未伪造能力 | 保留；`Blocked` + intent-level 码永远是历史归因，不是 `8a.v1` 覆盖；散文拒绝与「不支持意图得到 drafts」仍为拒绝；live 覆盖只到实际跑过的那一个意图类与那一次运行 |
+| `CrestCreates.Agent.Orchestration` 八种协调模式 | 原生执行内核（ReAct / Plan-and-Execute / Sequential / Parallel / Supervisor / Handoff-Swarm / Group Chat / Human-in-the-Loop） | 已交付指定边界 | JIT 18/18；MicrosoftAgent 边缘适配离线 25/25 + 8 live skip（Release 0 warning）；PostgreSQL NativeAOT `CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK`（linux-x64，publish/link/run）；DeepSeek 真实模型 live 8/8（JIT + 内存 store，HTTP 200/`stop`、usage 与快照工件；Parallel 2 并发；parent/child、handoff epoch、event resume 分别断言） | 保留；live 只证明模型驱动的正式编排路径与三份跨模式契约，不外推 NativeAOT、PostgreSQL、真实身份/权限/租户或生产 SLA |
+| Asset 样例真实链路（`samples/AssetManagement/**/E2E.Tests`） | 消费者与治理证据（oracle 两层判定：新契约覆盖 vs 历史归因） | 已交付指定边界 | JIT + 本地 PG：Asset 全量 E2E **145 通过 / 2 跳过（共 147）**（2026-11-23 修补复验，连跑 4 次稳定），跳过项为未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口；含演进治理链 8 例（发现→提案→评审→人工审批→回执）与复产验收 4 例；`AssetB12CoverageEntryTests` 常驻判别历史归因不得计为覆盖。带凭据 live（S5，单次、获准范围）：B12 不支持意图 → `UnsupportedIntent` + 3 条合法条目，oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审/零保存/零 gate、部署清单不变、未伪造能力。2026-11-23 复跑 live 类 2/2（单次、默认 4096 预算）：受支持维修意图 → HTTP 200/`stop`、真实 `deepseek-flash` 应答、1 个 `HumanTask` Create 草稿经确定性评审 Valid/Materialized（`HumanTaskDraftReviewed`）；不支持意图 → `UnsupportedIntent` + 2 条合法码、零草稿/零评审（`ExplicitUnsupportedResult`）。`NeedsClarification` 的 live 仍未执行 | 保留；`Blocked` + intent-level 码永远是历史归因，不是 `8a.v1` 覆盖；散文拒绝与「不支持意图得到 drafts」仍为拒绝；live 覆盖只到实际跑过的那一个意图类与那一次运行；单次 live 不作可重复性声明，也不新增原生覆盖 |
 | 样例 golden scenario（`samples/CrestCreates.Samples.DescriptorControlPlane`） | 消费者（runner/fake agent 三分支） | 已交付指定边界 | JIT：`CrestCreates.Samples.Tests` 37/37（显式终态零保存/零评审 + `FinalDecisionSource` 三向唯一） | 保留；显式终态不得进入草稿集合审查 |
 
 支持声明：`8a.v1` 两个显式终态与四类信封事实在**已执行样本范围**内为 **NativeAOT-verified（linux-x64，验收入口为用户目录官方 SDK 10.0.114 + 隐式 ILCompiler 10.0.14）**。该声明：

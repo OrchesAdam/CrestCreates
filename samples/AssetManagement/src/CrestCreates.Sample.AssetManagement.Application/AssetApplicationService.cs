@@ -117,6 +117,13 @@ public sealed class AssetApplicationService
         if (string.IsNullOrWhiteSpace(input.Reason))
             throw new ArgumentException("Maintenance reason is required.", nameof(input));
         var asset = await RequireVisibleAsync(assetId, tenantId, ct);
+        if (asset.Status == AssetStatus.MaintenancePending && asset.MaintenanceWorkflowInstanceId is { } existingId)
+        {
+            var recovered = await _workflowStarter.TryRecoverStartAsync(assetId, tenantId, userId, existingId, ct);
+            if (recovered is not null)
+                return new AssetOperationResult { AssetId = assetId, Status = asset.Status.ToString(), WorkflowInstanceId = recovered.WorkflowInstanceId, HumanTaskId = recovered.HumanTaskId };
+        }
+
         if (asset.Status is AssetStatus.Retired or AssetStatus.MaintenancePending)
             throw new InvalidOperationException($"Asset '{asset.AssetTag}' cannot enter maintenance from status '{asset.Status}'.");
         var workflow = await _workflowStarter.StartAsync(assetId, tenantId, userId, ct);
@@ -134,6 +141,8 @@ public sealed class AssetApplicationService
             await _workflowStarter.AbortAsync(workflow, "Asset maintenance business transition failed.", CancellationToken.None);
             throw;
         }
+
+        await _workflowStarter.ConfirmStartedAsync(assetId, tenantId, workflow, ct);
         return new AssetOperationResult { AssetId = assetId, Status = asset.Status.ToString(), WorkflowInstanceId = workflow.WorkflowInstanceId, HumanTaskId = workflow.HumanTaskId };
     }
 

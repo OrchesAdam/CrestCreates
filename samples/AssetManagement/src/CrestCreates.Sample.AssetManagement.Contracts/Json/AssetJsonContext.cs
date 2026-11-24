@@ -17,4 +17,10 @@ namespace CrestCreates.Sample.AssetManagement.Contracts.Json;
 [JsonSerializable(typeof(List<AssetResult>))]
 [JsonSerializable(typeof(AssetResult[]))]
 [JsonSerializable(typeof(AssetMaintenanceDecisionFact))]
+[JsonSerializable(typeof(Mes.TrialObservation))]
+[JsonSerializable(typeof(Mes.ProductionReleaseReceipt))]
+[JsonSerializable(typeof(AssetProductionLockFact))]
+[JsonSerializable(typeof(AssetMaintenanceEvidenceFact))]
+[JsonSerializable(typeof(AssetProductionReleaseInput))]
+[JsonSerializable(typeof(AssetProductionReleaseFact))]
 public sealed partial class AssetJsonContext : JsonSerializerContext;

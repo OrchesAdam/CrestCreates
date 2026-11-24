@@ -174,6 +174,12 @@ public sealed class AssetDesignCaseTests
         public Task<AssetMaintenanceWorkflowLease> StartAsync(Guid assetId, string tenantId, string requesterId, CancellationToken cancellationToken = default)
             => Task.FromResult(new AssetMaintenanceWorkflowLease("workflow-1", "task-1"));
 
+        public Task ConfirmStartedAsync(Guid assetId, string tenantId, AssetMaintenanceWorkflowLease lease, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<AssetMaintenanceWorkflowLease?> TryRecoverStartAsync(Guid assetId, string tenantId, string requesterId, string workflowInstanceId, CancellationToken cancellationToken = default)
+            => Task.FromResult<AssetMaintenanceWorkflowLease?>(null);
+
         public Task AbortAsync(AssetMaintenanceWorkflowLease lease, string reason, CancellationToken cancellationToken = default)
         {
             Aborted = true;

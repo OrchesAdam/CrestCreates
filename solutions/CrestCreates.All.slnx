@@ -317,6 +317,7 @@
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
   <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
   <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+  <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj" />
   <Project Path="../src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/CrestCreates.JsonContracts.BuildTasks.Core.csproj" />
   <Project Path="../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj" />
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests/CrestCreates.CapabilityEndpoint.AotFixture.Tests.csproj" />
@@ -346,6 +347,7 @@
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests/CrestCreates.Agent.Tools.E2E.Tests.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/CrestCreates.Agent.Tools.Tests.csproj" />
+  <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Orchestration.Tests/CrestCreates.Agent.Orchestration.Tests.csproj" />
   <Project Path="../tests/Shared/CrestCreates.Agent.Tools.Persistence.Testing/CrestCreates.Agent.Tools.Persistence.Testing.csproj" />
   <Project Path="../tests/Tooling/CrestCreates.JsonContracts.Build.PackageTests/CrestCreates.JsonContracts.Build.PackageTests.csproj" />
   <Project Path="../tests/Tooling/CrestCreates.JsonContracts.BuildTasks.Tests/CrestCreates.JsonContracts.BuildTasks.Tests.csproj" />

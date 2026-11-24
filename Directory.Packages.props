@@ -14,6 +14,8 @@
     <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
     <PackageVersion Include="Microsoft.AspNetCore.WebUtilities" Version="2.3.14" />
     <!-- Microsoft 核心包 -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.1" />
     <PackageVersion Include="DependencyInjection.StaticAccessor.Hosting" Version="10.0.0" />
     <PackageVersion Include="FreeSql.DbContext" Version="3.5.308" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="$(RuntimePackageVersion)" />

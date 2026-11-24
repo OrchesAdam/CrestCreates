@@ -28,6 +28,7 @@
     <ProjectReference Include="../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />

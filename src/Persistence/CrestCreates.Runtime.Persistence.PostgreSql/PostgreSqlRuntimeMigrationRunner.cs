@@ -207,6 +207,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ,"runtime_audit_retention_batches"
             ,"runtime_audit_retention_holds"
             ,"runtime_audit_retention_hold_receipts"
+            ,"agent_executions"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -671,6 +672,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
         public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
         [
+            new("agent_executions", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["root_run_id"] = ("uuid", "NO", null),
+                ["revision"] = BigInt, ["state_json"] = Json
+            }, ["tenant_scope_kind", "tenant_id", "root_run_id"],
+            [new("ck_agent_executions_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_agent_executions_revision", "check (revision >= 0)")], [], []),
             new("runtime_workflow_instances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
@@ -2024,6 +2032,20 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 foreign key (sink_id, audit_id, body_state)
                 references {schema}.runtime_audit_retention_ledger (sink_id, audit_id, body_state)
                 on delete restrict;
+            """),
+        new RuntimeMigration("V018", "agent_execution_coordination", """
+            create table {schema}.agent_executions (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                root_run_id uuid not null,
+                revision bigint not null,
+                state_json jsonb not null,
+                primary key (tenant_scope_kind, tenant_id, root_run_id),
+                constraint ck_agent_executions_scope check (
+                    (tenant_scope_kind = 'host' and tenant_id = '') or
+                    (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_agent_executions_revision check (revision >= 0)
+            );
             """),
     ];
 }

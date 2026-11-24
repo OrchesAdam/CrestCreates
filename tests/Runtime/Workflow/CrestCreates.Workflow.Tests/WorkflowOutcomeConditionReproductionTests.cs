@@ -10,6 +10,7 @@ using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Runtime.Delivery;
 using CrestCreates.Runtime.Persistence;
@@ -218,6 +219,76 @@ public sealed class WorkflowOutcomeConditionReproductionTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*unsupported status*Skipped*must not be returned by executors*");
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(null, 2)]
+    public async Task InitialExecution_RunsAndPersistsSelectedWorkflowVersion(int? requestedVersion, int expectedVersion)
+    {
+        var review = HumanTask("ht_versioned_review");
+        var first = VersionedWorkflow(1);
+        var second = VersionedWorkflow(2);
+        var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
+        workflowRegistry.Build([new InlineDescriptorProvider<WorkflowDescriptor>(first, second)]);
+        var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
+        humanTaskRegistry.Build([new InlineDescriptorProvider<HumanTaskDescriptor>(review)]);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddCrestLocalEventDispatch();
+        services.AddAccountability().AddAuditSink<InMemoryAuditSink>();
+        services.AddCapabilityRuntime();
+        services.AddRuntimePersistence();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        services.AddRuntimeDelivery();
+        services.AddHumanTaskRuntime();
+        services.AddWorkflowEngine();
+        services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
+        services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
+        await using var provider = services.BuildServiceProvider(validateScopes: true);
+        using var scope = provider.CreateScope();
+        var engine = scope.ServiceProvider.GetRequiredService<IWorkflowEngine>();
+        var workflowStore = scope.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>();
+        var taskStore = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+        var pinResolver = scope.ServiceProvider.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>();
+        var expected = expectedVersion == 1 ? first : second;
+
+        var started = await engine.ExecuteAsync(new WorkflowExecutionRequest
+        {
+            WorkflowId = first.Id,
+            WorkflowVersion = requestedVersion,
+            TenantId = "asset-tenant"
+        });
+
+        var persisted = await workflowStore.GetAsync(started.Key);
+        persisted.Should().NotBeNull();
+        persisted!.TenantId.Should().Be("asset-tenant");
+        persisted.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        persisted.WorkflowPin.Should().BeEquivalentTo(pinResolver.Capture(expected).Pin);
+        var pendingTasks = await taskStore.GetPendingByWorkflowAsync(started.Key);
+        pendingTasks.Should().ContainSingle().Which.WorkflowStepId.Should().Be(expected.Steps[0].Id);
+
+        WorkflowDescriptor VersionedWorkflow(int version) => new()
+        {
+            Id = "wf_versioned_asset_review",
+            Name = "Versioned asset review",
+            Version = version,
+            State = DescriptorState.Active,
+            Steps =
+            [
+                new WorkflowStep
+                {
+                    Id = $"review-v{version}",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(review.Id, review.Version)
+                    }
+                }
+            ]
+        };
     }
 
     private static async Task RunScenarioAsync(

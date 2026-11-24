@@ -1,5 +1,6 @@
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
@@ -107,6 +108,12 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
                 "Workflow continuation key does not match the waiting Workflow instance.");
         if (request.Result is not null)
             _stateRegistry.Validate(request.Result);
+        if (!Enum.TryParse<CompletionCondition>(request.Outcome, ignoreCase: false, out var humanTaskOutcome)
+            || !Enum.IsDefined(humanTaskOutcome)
+            || !string.Equals(humanTaskOutcome.ToString(), request.Outcome, StringComparison.Ordinal))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                $"Workflow continuation has malformed HumanTask outcome '{request.Outcome}'.");
 
         var runOperationId = _events.CreateRunOperationId();
         var parent = _contexts.Current;
@@ -136,6 +143,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             StepName = currentStep.Name,
             Status = StepExecutionStatus.Completed,
             Output = request.Result,
+            HumanTaskOutcome = humanTaskOutcome,
             ExecutedAt = DateTimeOffset.UtcNow
         });
 
