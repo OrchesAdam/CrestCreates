@@ -365,6 +365,7 @@
   </Folder>
   <Folder Name="/tests/Runtime/DistributedTransaction/">
     <Project Path="tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
+    <Project Path="tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP.IntegrationTests/CrestCreates.DistributedTransaction.CAP.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/tests/Persistence/">
     <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj" />
