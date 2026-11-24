@@ -1,5 +1,13 @@
 # CrestCreates platform status — 2026-11-24
 
+## 2026-11-24 — 八模式 PostgreSQL NativeAOT 场景、重启负控与 crash-window 恢复
+
+- **P0 八模式原生场景**：PostgreSQL AotHost 的 `AgentOrchestrationNativeScenario` 逐模式输出 sentinel：ReAct、Plan-and-Execute、Sequential、Parallel、Supervisor、Handoff、GroupChat、HITL。使用 scripted model/worker 与真实 V018 PostgreSQL 状态；Parallel 以 barrier 验证两个隔离 child 并发，Sequential/Plan 验证仅显式前一输出接续，GroupChat 验证轮内发布顺序，Handoff/HITL 分别验证 epoch fence 与 durable event resume。
+- **P1 重启与负控**：Plan、Parallel、Handoff、HITL 均以全新 `ServiceProvider` 重放，已完成 child/事件/交接不重复派发或写入。七个独立负控子进程覆盖旧 epoch、跨租户事件、重复派发、迟到结果、JSON 身份篡改、revision 篡改、未知 selector；每个预期拒绝退出 31 且不输出总 sentinel，意外成功退出 32。专用预期异常区分「守卫正确拒绝」与「负控意外成功」。
+- **P2 真实 crash-window**：复用同一原生可执行文件的子进程 commit→kill→fresh-provider 恢复，覆盖 handoff accept、event resume、parallel claim。Parallel 保持既有 fail-closed 语义：崩溃后重放拒绝重复派发，必须以持久化确认结果对账，确认后才重放结果；不自动重跑 worker，也不声称 exactly-once。
+- **执行证据（~/.dotnet 10.0.114，一次性 PostgreSQL 16，linux-x64）**：完整 JIT AotHost 主链退出 0；Orchestration JIT **18/18**；标准 PostgreSQL NativeAOT fixture **1/1**（真实 publish/link/run，2m03s），断言 8 个模式、4 个重启、7 个负控、3 个 crash-window 与各自汇总 sentinel。一次性容器已删除，未启动/停止共享服务。
+- **边界**：新增原生覆盖仅限 scripted model/worker + PostgreSQL V018 + linux-x64 的已执行场景；不外推真实模型、认证/租户/权限、其他 ORM/RID、生产 SLA 或自动 exactly-once 恢复。
+
 ## 2026-11-24 — 八种 Agent 模式核对与真实模型 live 8/8
 
 - **模式映射（与最初期望一致）**：ReAct=`AgentReActRunner.RunAsync`；Plan-and-Execute=`AgentRunCoordinator.SetPlanAsync` + `AgentTeamRunner.RunPlanAsync`；Sequential=`RunSequentialAsync`；Parallel=`RunParallelAsync`；Supervisor=`DelegateAsync`；Handoff/Swarm=`OfferHandoffAsync` + `AcceptHandoffAsync`；Group Chat=`RunDiscussionAsync`；Human-in-the-Loop=`WaitForEventAsync` + `ResumeAsync`。正式入口均在 `CrestCreates.Agent.Orchestration`，不是 sample 特例，也不是 runtime reflection fallback。

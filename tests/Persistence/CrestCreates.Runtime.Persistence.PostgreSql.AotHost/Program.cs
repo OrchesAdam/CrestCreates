@@ -51,7 +51,7 @@ using Microsoft.Extensions.Logging;
 
 if (args.Length is not (2 or 3 or 4))
 {
-    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario] | <connection-string> <schema> retention-negative <wrong-count|hold-filter|receipt-fault>");
+    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario] | <connection-string> <schema> retention-negative <wrong-count|hold-filter|receipt-fault> | <connection-string> <schema> orchestration-negative <control>");
     return 2;
 }
 
@@ -60,16 +60,22 @@ var options = new PostgreSqlRuntimePersistenceOptions { ConnectionString = args[
 // Child mode: CrashWorker-style subprocess that performs the durable pre-dispatch
 // writes for one crash window, prints the commit sentinel (with AttemptId), then
 // waits to be killed while the committed state stays durable in PostgreSQL.
+if (args.Length == 3 && args[2].StartsWith("orchestration-crash-", StringComparison.Ordinal))
+    return await AgentOrchestrationNativeScenario.RunCrashChildAsync(options, args[2]);
+
 if (args.Length == 3)
     return await RunPreDispatchCrashChildAsync(options, args[2]);
 
-if (args.Length == 4 && args[2] != "retention-negative")
+if (args.Length == 4 && args[2] is not ("retention-negative" or "orchestration-negative"))
 {
     Console.Error.WriteLine($"Unknown mode '{args[2]}'.");
     return 2;
 }
 
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+
+if (args.Length == 4 && args[2] == "orchestration-negative")
+    return await AgentOrchestrationNativeScenario.RunNegativeControlAsync(options, args[3]);
 
 if (args.Length == 4)
     return await RunAuditRetentionNegativeControlAsync(options, args[3]);
@@ -407,39 +413,55 @@ static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistence
         {
             ApplicationName = applicationName
         };
+        var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("ProcessPath unavailable");
+        var hostPrefix = string.Equals(Path.GetFileName(processPath), "dotnet", StringComparison.OrdinalIgnoreCase)
+            ? $"\"{Environment.GetCommandLineArgs()[0]}\" "
+            : string.Empty;
         using var child = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = Environment.ProcessPath ?? throw new InvalidOperationException("ProcessPath unavailable"),
-                Arguments = $"\"{connectionBuilder.ConnectionString}\" {options.Schema} {scenario.Scenario}",
+                FileName = processPath,
+                Arguments = $"{hostPrefix}\"{connectionBuilder.ConnectionString}\" {options.Schema} {scenario.Scenario}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false
             }
         };
         child.Start();
-        using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-        var stderrTask = child.StandardError.ReadToEndAsync(readyTimeout.Token);
         string? attemptId = null;
-        while (await child.StandardOutput.ReadLineAsync(readyTimeout.Token) is { } line)
+        try
         {
-            if (line.StartsWith(scenario.Sentinel, StringComparison.Ordinal))
+            using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            var stderrTask = child.StandardError.ReadToEndAsync(readyTimeout.Token);
+            while (await child.StandardOutput.ReadLineAsync(readyTimeout.Token) is { } line)
             {
-                var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                attemptId = parts.Length == 2 ? parts[1] : null;
-                break;
+                if (line.StartsWith(scenario.Sentinel, StringComparison.Ordinal))
+                {
+                    var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    attemptId = parts.Length == 2 ? parts[1] : null;
+                    break;
+                }
+            }
+            if (attemptId is null)
+            {
+                var stderr = child.HasExited ? await stderrTask : "Crash worker is still running.";
+                throw new InvalidOperationException(
+                    $"[{scenario.Scenario}] Crash worker produced no sentinel. Stderr: {stderr}");
+            }
+
+            child.Kill(entireProcessTree: true);
+            await child.WaitForExitAsync();
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+                await child.WaitForExitAsync();
             }
         }
-        if (attemptId is null)
-        {
-            var stderr = await stderrTask;
-            throw new InvalidOperationException(
-                $"[{scenario.Scenario}] Crash worker produced no sentinel. Stderr: {stderr}");
-        }
 
-        child.Kill(entireProcessTree: true);
-        await child.WaitForExitAsync();
         await WaitForBackendExitAsync(options.ConnectionString, applicationName);
 
         var key = new AgentToolLogicalInvocationKey("tenant", "user", "agent", "exec", scenario.Scenario);

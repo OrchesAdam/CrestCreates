@@ -45,6 +45,36 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("CRESTCREATES_AGENT_EXECUTION_PERSISTENCE_NATIVE_OK");
             execution.Output.Should().Contain("CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK");
+            foreach (var sentinel in new[]
+                     {
+                         "CRESTCREATES_AGENT_MODE_REACT_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_PLAN_AND_EXECUTE_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_SEQUENTIAL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_PARALLEL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_SUPERVISOR_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_HANDOFF_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_GROUP_CHAT_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_HUMAN_IN_THE_LOOP_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_PLAN_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_PARALLEL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_HANDOFF_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_HUMAN_IN_THE_LOOP_NATIVE_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_OLD_EPOCH_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CROSS_TENANT_EVENT_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_DUPLICATE_DISPATCH_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_LATE_RESULT_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_INVALID_JSON_IDENTITY_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_INVALID_JSON_REVISION_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_UNKNOWN_SELECTOR_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CONTROLS_OK",
+                         "CRESTCREATES_AGENT_CRASH_HANDOFF_ACCEPT_OK",
+                         "CRESTCREATES_AGENT_CRASH_EVENT_RESUME_OK",
+                         "CRESTCREATES_AGENT_CRASH_PARALLEL_CLAIM_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_CRASH_WINDOWS_OK"
+                     })
+            {
+                execution.Output.Should().Contain(sentinel, execution.Output);
+            }
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
