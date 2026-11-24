@@ -29,7 +29,7 @@ public sealed class MicrosoftAgentReActModelExecutor(MicrosoftAgentCoordinationM
             "Do not invent artifact IDs or hashes. CrestCreates creates the result artifact.");
         var completion = await model.CompleteAsync(
             "You are a CrestCreates ReAct worker. Return strict JSON only, with no prose and no tool-call envelope.",
-            prompt, cancellationToken);
+            prompt, new MicrosoftAgentCoordinationCallOptions(request.TokenLimit), cancellationToken);
         using var document = JsonDocument.Parse(completion.Text);
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)

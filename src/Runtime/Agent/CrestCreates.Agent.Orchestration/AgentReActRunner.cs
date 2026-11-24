@@ -66,7 +66,8 @@ public sealed class AgentReActRunner(AgentRunCoordinator coordinator, TimeProvid
                 await ClaimAsync(key, owner, modelOperation, new(allocation, 0), modelReceipt, token);
                 var response = await model.ExecuteAsync(new(context, index + 1, allocation, transcript.ToImmutable()), token);
                 decision = CheckDecision(response.Decision, context);
-                await coordinator.RecordModelDecisionAsync(key, owner, modelOperation, response.UsedTokens, decision, cancellationToken);
+                await coordinator.ReconcileAsync(key, owner, modelOperation,
+                    new AgentModelTurnReconciliation(response.UsedTokens, decision), cancellationToken);
             }
 
             if (decision.Result is { } result)
@@ -89,7 +90,8 @@ public sealed class AgentReActRunner(AgentRunCoordinator coordinator, TimeProvid
                 observation = await tools.InvokeAsync(context, toolOperation, selection, token);
                 ArgumentException.ThrowIfNullOrWhiteSpace(observation.Code);
                 observation = observation with { StructuredOutput = observation.StructuredOutput?.Clone() };
-                await coordinator.RecordToolObservationAsync(key, owner, toolOperation, observation, cancellationToken);
+                await coordinator.ReconcileAsync(key, owner, toolOperation,
+                    new AgentToolObservationReconciliation(observation), cancellationToken);
             }
 
             transcript.Add(new(selection, observation));

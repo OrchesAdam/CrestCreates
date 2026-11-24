@@ -60,6 +60,70 @@ public sealed class AgentReActRunnerTests
         Assert.Single(state.Reservations.Values, item => item.Used is null);
     }
 
+    [Fact]
+    public async Task ReActReconcilesALostModelResponseAndContinuesWithoutRepeatingTheTurn()
+    {
+        var (_, owner, coordinator) = await StartAsync();
+        AgentModelTurnResponse? recovered = null;
+        var lostModel = new ScriptedModel(_ =>
+        {
+            recovered = new(12, new(new("metadata.read", JsonSerializer.SerializeToElement(new { Query = "asset" })), null));
+            throw new IOException("Lost model response.");
+        });
+        var tools = new ScriptedTools(_ => new("Success", true, JsonSerializer.SerializeToElement(7)));
+        await Assert.ThrowsAsync<IOException>(() => new AgentReActRunner(coordinator, TimeProvider.System)
+            .RunAsync(_key, owner, lostModel, tools, 3, 30).AsTask());
+        var interrupted = (await _store.FindAsync(_key, default))!.Runs[owner.RunId];
+        var operation = Assert.Single(interrupted.Reservations, entry => entry.Value.Used is null).Key;
+        Assert.True(await coordinator.ReconcileAsync(_key, owner, operation,
+            new AgentModelTurnReconciliation(recovered!.UsedTokens, recovered.Decision)));
+
+        var continuationCalls = 0;
+        var continuation = new ScriptedModel(request =>
+        {
+            continuationCalls++;
+            Assert.Equal(2, request.Round);
+            Assert.Equal(7, Assert.Single(request.PreviousExchanges).Observation.StructuredOutput?.GetInt32());
+            return new(13, new(null, new(AgentResultKind.Returned, "Recovered", new("report", "hash"))));
+        });
+        var result = await new AgentReActRunner(new AgentRunCoordinator(_store, TimeProvider.System), TimeProvider.System)
+            .RunAsync(_key, owner, continuation, tools, 3, 30);
+        Assert.Equal("Recovered", result.Code);
+        Assert.Equal(1, lostModel.Calls);
+        Assert.Equal(1, continuationCalls);
+        Assert.Equal(1, tools.Calls);
+    }
+
+    [Fact]
+    public async Task ReActReconcilesALostToolResponseAndContinuesWithoutRepeatingTheTool()
+    {
+        var (_, owner, coordinator) = await StartAsync();
+        var model = new ScriptedModel(request => request.Round == 1
+            ? new(12, new(new("metadata.read", null), null))
+            : new(13, new(null, new(AgentResultKind.Returned, "Recovered", new("report", "hash")))));
+        AgentToolObservation? recovered = null;
+        var tools = new ScriptedTools(_ =>
+        {
+            recovered = new("Success", true, JsonSerializer.SerializeToElement("before\0after"));
+            throw new IOException("Lost tool response.");
+        });
+        await Assert.ThrowsAsync<IOException>(() => new AgentReActRunner(coordinator, TimeProvider.System)
+            .RunAsync(_key, owner, model, tools, 3, 30).AsTask());
+        var interrupted = (await _store.FindAsync(_key, default))!.Runs[owner.RunId];
+        var operation = Assert.Single(interrupted.Reservations, entry => entry.Value.Used is null).Key;
+        var reconciliation = new AgentToolObservationReconciliation(recovered!);
+        Assert.True(await coordinator.ReconcileAsync(_key, owner, operation, reconciliation));
+        Assert.False(await coordinator.ReconcileAsync(_key, owner, operation, reconciliation));
+
+        var result = await new AgentReActRunner(new AgentRunCoordinator(_store, TimeProvider.System), TimeProvider.System)
+            .RunAsync(_key, owner, model, tools, 3, 30);
+        Assert.Equal("Recovered", result.Code);
+        Assert.Equal(2, model.Calls);
+        Assert.Equal(1, tools.Calls);
+        var state = (await _store.FindAsync(_key, default))!.Runs[owner.RunId];
+        Assert.Equal("before\0after", state.Reservations[operation].ToolObservation?.StructuredOutput?.GetString());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

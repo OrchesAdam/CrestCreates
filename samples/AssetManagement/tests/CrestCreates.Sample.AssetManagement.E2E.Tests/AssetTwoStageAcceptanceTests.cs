@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.Enums;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Dtos;
@@ -295,7 +296,8 @@ public sealed class AssetTwoStageAcceptanceTests
             identity.Set("tenant-b", "manager-2", null, DataScope.Tenant, "asset-manager");
             Func<Task> complete = () => wrongTenant.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>()
                 .CompleteAsync(initial.HumanTaskId!, "Approve", "Wrong tenant");
-            await complete.Should().ThrowAsync<InvalidOperationException>();
+            await complete.Should().ThrowAsync<CapabilityFailureException>()
+                .Where(exception => exception.ErrorCode == "CAPABILITY_RESOURCE_NOT_FOUND");
         }
         using (var unauthorized = factory.Services.CreateScope())
         {
@@ -303,7 +305,8 @@ public sealed class AssetTwoStageAcceptanceTests
             identity.Set("tenant-a", "user-1", null, DataScope.Tenant, "asset-user");
             Func<Task> complete = () => unauthorized.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>()
                 .CompleteAsync(initial.HumanTaskId!, "Approve", "Unauthorized");
-            await complete.Should().ThrowAsync<UnauthorizedAccessException>();
+            await complete.Should().ThrowAsync<CapabilityFailureException>()
+                .Where(exception => exception.ErrorCode == "CAPABILITY_FORBIDDEN");
         }
 
         var pending = await SendAsync<AssetResult>(client, HttpMethod.Get, $"/api/assets/{asset.Id}", null, HttpStatusCode.OK);

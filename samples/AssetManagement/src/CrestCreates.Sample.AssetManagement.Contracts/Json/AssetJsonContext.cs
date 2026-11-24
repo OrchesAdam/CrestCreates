@@ -11,6 +11,7 @@ namespace CrestCreates.Sample.AssetManagement.Contracts.Json;
 [JsonSerializable(typeof(TransferAssetInput))]
 [JsonSerializable(typeof(MaintenanceRequestInput))]
 [JsonSerializable(typeof(MaintenanceDecisionInput))]
+[JsonSerializable(typeof(MaintenanceTaskCompletionInput))]
 [JsonSerializable(typeof(AssetIdInput))]
 [JsonSerializable(typeof(AssetResult))]
 [JsonSerializable(typeof(AssetOperationResult))]

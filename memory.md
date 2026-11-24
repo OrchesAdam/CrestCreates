@@ -1,5 +1,14 @@
 # CrestCreates platform status — 2026-11-24
 
+## 2026-11-24 — PR #194 审查修复（本地修复，未提交/推送/合并）
+
+- **治理入口**：`AssetProductionEvolutionOperator` 拆为 `ProposeAsync` 与 `ApproveAsync`；提案只创建待审 activation request，CLI 必须输入精确 `APPROVE <approver>` 才以独立人类身份完成 HumanTask，拒绝自审批。该入口仍是本地确定性样例（DevelopmentDefaults + InMemory Control Plane stubs），不宣称生产认证或 durable activation。
+- **Workflow 可靠恢复**：acceptance 的 `RunOperationId` 固定复用持久化 `CompletionEventId`；新增 V019 `runtime_workflow_continuation_resume_claims`，以 outbox lease/fence 做原子恢复 claim，绑定精确 `WorkflowToRevision`。活跃 claim 阻止并发重放，失败/取消释放并让 Outbox 返回 Retry，成功保留完成标记；旧 acceptance 在后续 revision 上不再恢复。初始执行与重放共用同一 claim 路径，不再吞掉 post-resume 异常。独立复审后又修正 PostgreSQL「先锁 workflow、再读 claim」的首次插入竞态，以及 InMemory claim 深拷贝/ambient 回滚语义，并补两会话竞态与回滚回归。InMemory 与 PostgreSQL 主链同契约。
+- **其余审查修复**：Plan 保护所有已启动步骤（不只前缀）；legacy discussion 仅允许空集合幂等重开；DynamicApi fallback 按 transport-neutral failure facts 映射 400/401/403/404/409/428/499/504；Asset 完成走正式 CapabilityEndpoint，校验租户/资产/task 关联，未知或跨租户 task 返回 404，完成后回读权威资产状态。
+- **串行证据（~/.dotnet 10.0.114 + 一次性 PG16）**：Workflow **124/124**；PostgreSQL 新增 claim 聚焦 **3/3**（含两会话首次插入竞态）；Agent.Orchestration **30/30**；DynamicApi **172/172**；Asset 治理/审批聚焦 **5/5**；Asset E2E **148/148 + 2 live opt-in skip**；PostgreSQL 全量首轮 **495/496**，唯一失败为未同步 V019 表清单，修正后该迁移用例 **1/1** 复跑通过（覆盖合计 496）；PostgreSQL NativeAOT fixture **1/1**（真实 publish/link/run，最终竞态修正后 1m59s），新增 `CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK`，断言稳定 operation identity 与完成后拒绝重放。
+- **最终构建**：`CrestCreates.slnx` 全方案 `dotnet build --no-restore -m:1 -p:UseSharedCompilation=false` **0 error / 11 个既有依赖 trimming warning**，本轮修复文件无新增 warning。
+- **边界**：原生新增断言覆盖 PostgreSQL + linux-x64 的正式 continuation 完成/拒绝重放路径；跨 provider 原子 claim、失败释放、旧 revision 拒绝由 JIT PostgreSQL 回归证明。lease 到期后的崩溃恢复不承诺分布式 exactly-once，真实认证/权限/租户、其他 ORM/RID 与生产治理 activation 不外推。本轮未提交、未推送、未合并。
+
 ## 2026-11-24 — 八模式 PostgreSQL NativeAOT 场景、重启负控与 crash-window 恢复
 
 - **P0 八模式原生场景**：PostgreSQL AotHost 的 `AgentOrchestrationNativeScenario` 逐模式输出 sentinel：ReAct、Plan-and-Execute、Sequential、Parallel、Supervisor、Handoff、GroupChat、HITL。使用 scripted model/worker 与真实 V018 PostgreSQL 状态；Parallel 以 barrier 验证两个隔离 child 并发，Sequential/Plan 验证仅显式前一输出接续，GroupChat 验证轮内发布顺序，Handoff/HITL 分别验证 epoch fence 与 durable event resume。

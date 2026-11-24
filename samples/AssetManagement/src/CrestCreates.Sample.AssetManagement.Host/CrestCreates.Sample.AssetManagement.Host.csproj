@@ -36,9 +36,14 @@
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Prompting/CrestCreates.Agent.Prompting.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="../../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
   </ItemGroup>
 </Project>

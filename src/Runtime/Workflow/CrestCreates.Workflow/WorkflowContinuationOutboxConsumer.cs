@@ -28,9 +28,17 @@ internal sealed partial class WorkflowContinuationOutboxConsumer : IOutboxRequir
                 Outcome = payload.Outcome,
                 Result = payload.Result,
                 CompletionEventId = payload.EventId,
-                TriggerOperationId = payload.EventId
+                TriggerOperationId = payload.EventId,
+                ResumeLease = new WorkflowContinuationResumeLease(
+                    $"{context.Lease.OwnerId}:{context.Message.Metadata.MessageId}",
+                    context.Lease.Fence,
+                    context.Lease.ExpiresAt)
             }, cancellationToken).ConfigureAwait(false);
             return OutboxRequiredConsumerResult.Accepted();
+        }
+        catch (OperationCanceledException ex)
+        {
+            return OutboxRequiredConsumerResult.Retry("WORKFLOW_CONTINUATION_CANCELLED", ex.Message);
         }
         catch (RuntimeConcurrencyException ex)
         {

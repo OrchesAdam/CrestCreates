@@ -65,6 +65,8 @@ public sealed class AssetApplicationService
     {
         await CheckAsync(AssetPermissions.Assets.Update, ct);
         var asset = await RequireVisibleAsync(assetId, tenantId, ct);
+        if (asset.Status == AssetStatus.MaintenancePending && !string.Equals(asset.Category, input.Category, StringComparison.Ordinal))
+            throw new CapabilityFailureException("ASSET_MAINTENANCE_CATEGORY_LOCKED", "An asset under maintenance cannot change its critical-equipment classification.");
         var expected = asset.ConcurrencyStamp;
         asset.UpdateDetails(input.Name, input.Description, input.Category, input.Location, userId);
         await _store.UpdateAsync(asset, expected, ct);

@@ -21,23 +21,27 @@ public sealed partial class AgentRunCoordinator
             {
                 ValidateAssignment(step);
                 RequireNarrowerScope(run, step.Tools, step.Inputs);
+                if (execution.Runs.TryGetValue(step.RunId, out var existing))
+                {
+                    if (existing.ChildCall != new AgentChildCall(owner.RunId, owner.Epoch, step.RunId) ||
+                        existing.OriginalAssignment is not { } original || !SameAssignment(original, step))
+                    {
+                        throw new InvalidOperationException("A plan step ID is already bound outside this owner's matching child scope.");
+                    }
+                }
             }
 
             if (previous is not null)
             {
-                var reservedPrefix = 0;
                 for (var index = 0; index < previous.Steps.Length; index++)
                 {
-                    if (execution.Runs.ContainsKey(previous.Steps[index].RunId))
+                    var step = previous.Steps[index];
+                    if (execution.Runs.TryGetValue(step.RunId, out var child) &&
+                        child.ChildCall == new AgentChildCall(owner.RunId, owner.Epoch, step.RunId) &&
+                        (index >= steps.Length || !SameAssignment(steps[index], step)))
                     {
-                        reservedPrefix = index + 1;
+                        throw new InvalidOperationException("An authorized plan cannot delete, move or rewrite a started step.");
                     }
-                }
-
-                if (steps.Length < reservedPrefix || Enumerable.Range(0, reservedPrefix)
-                    .Any(index => !SameAssignment(steps[index], previous.Steps[index])))
-                {
-                    throw new InvalidOperationException("An authorized plan cannot rewrite a started step or its prefix.");
                 }
             }
 
@@ -97,6 +101,24 @@ public sealed partial class AgentRunCoordinator
     public ValueTask<AgentDiscussionSnapshot> OpenDiscussionAsync(
         AgentExecutionKey key, AgentRunOwner moderator, Guid discussionId, ImmutableArray<string> participants,
         int maxTurns, CancellationToken cancellationToken = default) =>
+        OpenDiscussionAsync(key, moderator, discussionId, participants, maxTurns, null, cancellationToken);
+
+    public ValueTask<AgentDiscussionSnapshot> OpenDiscussionAsync(
+        AgentExecutionKey key, AgentRunOwner moderator, Guid discussionId, ImmutableArray<AgentRunAssignment> participants,
+        int maxTurns, CancellationToken cancellationToken = default)
+    {
+        if (participants.IsDefaultOrEmpty)
+        {
+            throw new ArgumentException("At least one participant assignment is required.", nameof(participants));
+        }
+
+        return OpenDiscussionAsync(key, moderator, discussionId,
+            [.. participants.Select(item => item.AgentId)], maxTurns, participants, cancellationToken);
+    }
+
+    private ValueTask<AgentDiscussionSnapshot> OpenDiscussionAsync(
+        AgentExecutionKey key, AgentRunOwner moderator, Guid discussionId, ImmutableArray<string> participants,
+        int maxTurns, ImmutableArray<AgentRunAssignment>? assignments, CancellationToken cancellationToken) =>
         ChangeAsync(key, execution =>
         {
             var run = RequireRunnable(execution, moderator);
@@ -108,10 +130,25 @@ public sealed partial class AgentRunCoordinator
                 throw new ArgumentException("A discussion requires distinct registered participants.", nameof(participants));
             }
 
+            if (assignments is { } participantAssignments)
+            {
+                if (participantAssignments.Select(item => item.RunId).Distinct().Count() != participantAssignments.Length)
+                {
+                    throw new ArgumentException("A discussion requires distinct participant run identities.", nameof(assignments));
+                }
+
+                foreach (var assignment in participantAssignments)
+                {
+                    ValidateAssignment(assignment);
+                    RequireNarrowerScope(run, assignment.Tools, assignment.Inputs);
+                }
+            }
+
             if (run.Discussion is { } previous && previous.OwnerEpoch == moderator.Epoch)
             {
                 if (previous.DiscussionId != discussionId || previous.MaxTurns != maxTurns ||
-                    !previous.Participants.SequenceEqual(participants, StringComparer.Ordinal))
+                    !previous.Participants.SequenceEqual(participants, StringComparer.Ordinal) ||
+                    !SameDiscussionAssignments(previous.Assignments, assignments ?? []))
                 {
                     throw new InvalidOperationException("The run already has a different discussion.");
                 }
@@ -119,9 +156,18 @@ public sealed partial class AgentRunCoordinator
                 return (execution.Runs, previous);
             }
 
-            var discussion = new AgentDiscussionSnapshot(discussionId, moderator.Epoch, maxTurns, participants, []);
+            var discussion = new AgentDiscussionSnapshot(discussionId, moderator.Epoch, maxTurns, participants, [])
+            {
+                Assignments = assignments ?? []
+            };
             return (execution.Runs.SetItem(moderator.RunId, run with { Discussion = discussion }), discussion);
         }, cancellationToken);
+
+    private static bool SameDiscussionAssignments(
+        ImmutableArray<AgentRunAssignment> stored, ImmutableArray<AgentRunAssignment> received) =>
+        stored.IsDefaultOrEmpty && received.IsDefaultOrEmpty ||
+        !stored.IsDefaultOrEmpty && !received.IsDefaultOrEmpty && stored.Length == received.Length &&
+        Enumerable.Range(0, stored.Length).All(index => SameAssignment(stored[index], received[index]));
 
     public ValueTask<AgentDiscussionSnapshot> PublishDiscussionReplyAsync(
         AgentExecutionKey key, AgentRunOwner moderator, Guid discussionId, Guid speakerRunId,

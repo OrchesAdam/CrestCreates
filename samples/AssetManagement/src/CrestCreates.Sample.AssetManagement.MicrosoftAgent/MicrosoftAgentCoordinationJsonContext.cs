@@ -9,7 +9,7 @@ internal sealed record CoordinationToolExchangePrompt(
 internal sealed record CoordinationInputPrompt(string Id, string ContentHash, string? Text);
 
 internal sealed record CoordinationResumedPrompt(
-    string EventId, string Source, string Kind, string SubjectId, string? Text);
+    string EventId, string Source, string Kind, string SubjectId, string ContentHash, string? Text);
 
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(CoordinationToolExchangePrompt[]))]

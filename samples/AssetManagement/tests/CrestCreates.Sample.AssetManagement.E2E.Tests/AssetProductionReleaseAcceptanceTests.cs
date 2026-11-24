@@ -14,12 +14,14 @@ using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Domain.Shared.Enums;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Dtos;
 using CrestCreates.Sample.AssetManagement.Contracts.Mes;
 using CrestCreates.Sample.AssetManagement.Domain;
 using CrestCreates.Sample.AssetManagement.Host;
+using CrestCreates.Sample.AssetManagement.Host.ApprovedReleases;
 using CrestCreates.Sample.AssetManagement.Host.ProductionRelease;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.AspNetCore.Builder;
@@ -51,11 +53,28 @@ public sealed class AssetProductionReleaseAcceptanceTests
         using var client = host.CreateClient();
 
         var asset = await RegisterCriticalAssetAsync(client);
+        var otherAsset = await RegisterCriticalAssetAsync(client);
         var maintenance = await RequestMaintenanceAsync(client, Tenant, asset.Id);
         var workflowInstance = await ReadWorkflowByIdAsync(host, maintenance.WorkflowInstanceId!);
         workflowInstance.WorkflowPin.Ref.Version.Should().Be(AssetProductionDescriptors.WorkflowVersion);
         var initialTask = await PendingTaskAsync(host, workflowInstance.InstanceId, AssetContractIds.MaintenanceInitialHumanTask);
-        await CompleteAsAsync(host, "supervisor-1", "asset-manager", initialTask.Id, "Approve");
+        using (var missing = await CompleteTaskAsync(client, "supervisor-1", "asset-manager", asset.Id, initialTask.Id, "Approve", "other-tenant"))
+        {
+            missing.StatusCode.Should().Be(HttpStatusCode.NotFound, await missing.Content.ReadAsStringAsync());
+        }
+        using (var unknown = await CompleteTaskAsync(client, "supervisor-1", "asset-manager", asset.Id, "missing-task", "Approve"))
+        {
+            unknown.StatusCode.Should().Be(HttpStatusCode.NotFound, await unknown.Content.ReadAsStringAsync());
+        }
+        using (var mismatch = await CompleteTaskAsync(client, "supervisor-1", "asset-manager", otherAsset.Id, initialTask.Id, "Approve"))
+        {
+            var failure = await mismatch.Content.ReadAsStringAsync();
+            mismatch.StatusCode.Should().Be(HttpStatusCode.BadRequest, failure);
+            failure.Should().Contain("ASSET_MAINTENANCE_TASK_MISMATCH");
+        }
+        (await PendingTaskAsync(host, workflowInstance.InstanceId, AssetContractIds.MaintenanceInitialHumanTask)).Status
+            .Should().BeOneOf(HumanTaskInstanceStatus.Created, HumanTaskInstanceStatus.Assigned);
+        await CompleteAsAsync(client, "supervisor-1", "asset-manager", asset.Id, initialTask.Id, "Approve");
         var trialTask = await PendingTaskAsync(host, workflowInstance.InstanceId, AssetProductionDescriptors.TrialTaskId);
 
         var lockPath = $"api/mes/production-locks/{asset.Id}/{workflowInstance.InstanceId}";
@@ -75,7 +94,13 @@ public sealed class AssetProductionReleaseAcceptanceTests
         trialCompletion.StepResults.Should().Contain(step => step.StepId == AssetProductionDescriptors.TrialStepId &&
             step.HumanTaskOutcome == CompletionCondition.Approve);
         trialTask.HumanTaskId.Should().Be(AssetProductionDescriptors.TrialTaskId);
-        await CompleteAsAsync(host, "quality-1", AssetProductionDescriptors.QualityRole, qualityTask.Id, "Approve");
+        using (var qualityResponse = await CompleteTaskAsync(client, "quality-1", AssetProductionDescriptors.QualityRole, asset.Id, qualityTask.Id, "Approve"))
+        {
+            var qualityBody = await qualityResponse.Content.ReadAsStringAsync();
+            qualityResponse.StatusCode.Should().Be(HttpStatusCode.OK, qualityBody);
+            var qualityResult = await qualityResponse.Content.ReadFromJsonAsync<AssetOperationResult>(WireOptions);
+            qualityResult!.Status.Should().Be(nameof(AssetStatus.Available));
+        }
         (await ReadWorkflowByIdAsync(host, workflowInstance.InstanceId)).Status.Should().Be(WorkflowInstanceStatus.Completed);
 
         var releaseInput = new AssetProductionReleaseInput
@@ -99,6 +124,58 @@ public sealed class AssetProductionReleaseAcceptanceTests
         var finalLock = await mesClient.GetFromJsonAsync(lockPath, MesJsonContext.Default.ProductionLockState);
         finalLock!.IsLocked.Should().BeFalse();
         finalLock.Release!.OperationId.Should().Be(released.OperationId);
+    }
+
+    [Fact]
+    public async Task FailedOrExpiredMesTrial_RequiresExplicitReworkAndRetestBeforeRelease()
+    {
+        await using var governance = await AssetControlPlaneApprovalHarness.CreateAsync(Tenant, additionalBaseline: ProductionBaseline());
+        var workflow = await SubmitProductionWorkflowAsync(governance);
+        await governance.CompleteHumanAsync(workflow, "workflow-reviewer", "Approve");
+        var receipt = await IssueProductionReleaseAsync(governance, workflow);
+        using var mesDatabase = new MesDatabase();
+        await using var mes = await mesDatabase.StartAsync("00:00:00.0000001");
+        using var host = new ProductionHostFactory(new HostDatabase(), receipt, mes.BaseAddress);
+        using var client = host.CreateClient();
+        using var mesClient = mes.Client();
+        var asset = await RegisterCriticalAssetAsync(client);
+
+        var failedOrder = await RequestMaintenanceAsync(client, Tenant, asset.Id);
+        var failedWorkflow = await ReadWorkflowByIdAsync(host, failedOrder.WorkflowInstanceId!);
+        var failedInitial = await PendingTaskAsync(host, failedWorkflow.InstanceId, AssetContractIds.MaintenanceInitialHumanTask);
+        await CompleteAsAsync(client, "supervisor-1", "asset-manager", asset.Id, failedInitial.Id, "Approve");
+        var failedLockPath = $"api/mes/production-locks/{asset.Id}/{failedWorkflow.InstanceId}";
+        var failedLock = await mesClient.GetFromJsonAsync(failedLockPath, MesJsonContext.Default.ProductionLockState);
+        using var failedTrial = await mesClient.PutAsJsonAsync($"{failedLockPath}/observations/{Guid.NewGuid()}",
+            new RecordTrialRequest(TrialOutcome.Failed, failedLock!.RegisteredAt), MesJsonContext.Default.RecordTrialRequest);
+        failedTrial.EnsureSuccessStatusCode();
+        await WaitForWorkflowStatusAsync(host, failedWorkflow.InstanceId, WorkflowInstanceStatus.Completed);
+        (await ReadWorkflowByIdAsync(host, failedWorkflow.InstanceId)).StepResults.Should().Contain(step =>
+            step.StepId == AssetProductionDescriptors.TrialStepId && step.HumanTaskOutcome == CompletionCondition.Reject);
+        await WaitForAssetStatusAsync(client, asset.Id, nameof(AssetStatus.Available));
+
+        var retestOrder = await RequestMaintenanceAsync(client, Tenant, asset.Id);
+        retestOrder.WorkflowInstanceId.Should().NotBe(failedOrder.WorkflowInstanceId);
+        var retestWorkflow = await ReadWorkflowByIdAsync(host, retestOrder.WorkflowInstanceId!);
+        var retestInitial = await PendingTaskAsync(host, retestWorkflow.InstanceId, AssetContractIds.MaintenanceInitialHumanTask);
+        await CompleteAsAsync(client, "supervisor-1", "asset-manager", asset.Id, retestInitial.Id, "Approve");
+        var retestLockPath = $"api/mes/production-locks/{asset.Id}/{retestWorkflow.InstanceId}";
+        var retestLock = await mesClient.GetFromJsonAsync(retestLockPath, MesJsonContext.Default.ProductionLockState);
+        using var passedTrial = await mesClient.PutAsJsonAsync($"{retestLockPath}/observations/{Guid.NewGuid()}",
+            new RecordTrialRequest(TrialOutcome.Passed, retestLock!.RegisteredAt), MesJsonContext.Default.RecordTrialRequest);
+        passedTrial.EnsureSuccessStatusCode();
+        var qualityTask = await WaitForPendingTaskAsync(host, retestWorkflow.InstanceId, AssetProductionDescriptors.QualityTaskId);
+        using var staleApproval = await CompleteTaskAsync(client, "quality-1", AssetProductionDescriptors.QualityRole,
+            asset.Id, qualityTask.Id, "Approve");
+        staleApproval.StatusCode.Should().NotBe(HttpStatusCode.OK);
+        (await PendingTaskAsync(host, retestWorkflow.InstanceId, AssetProductionDescriptors.QualityTaskId)).Id.Should().Be(qualityTask.Id);
+        await CompleteAsAsync(client, "quality-1", AssetProductionDescriptors.QualityRole, asset.Id, qualityTask.Id, "Reject");
+        await WaitForWorkflowStatusAsync(host, retestWorkflow.InstanceId, WorkflowInstanceStatus.Completed);
+        await WaitForAssetStatusAsync(client, asset.Id, nameof(AssetStatus.Available));
+
+        var finalOrder = await RequestMaintenanceAsync(client, Tenant, asset.Id);
+        finalOrder.WorkflowInstanceId.Should().NotBe(retestOrder.WorkflowInstanceId);
+        (await ReadWorkflowByIdAsync(host, finalOrder.WorkflowInstanceId!)).WorkflowPin.Ref.Version.Should().Be(AssetProductionDescriptors.WorkflowVersion);
     }
 
     [Fact]
@@ -134,7 +211,7 @@ public sealed class AssetProductionReleaseAcceptanceTests
         (await ReadWorkflowByIdAsync(after, otherOrder.WorkflowInstanceId!, otherTenant)).WorkflowPin.Should().Be(baseline.WorkflowPin);
         using var ordinaryLock = await mesClient.GetAsync($"api/mes/production-locks/{ordinary.Id}/{ordinaryOrder.WorkflowInstanceId}");
         ordinaryLock.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        await CompleteAsAsync(after, "supervisor-1", "asset-manager", inFlight.HumanTaskId!, "Approve");
+        await CompleteAsAsync(afterClient, "supervisor-1", "asset-manager", inFlight.AssetId, inFlight.HumanTaskId!, "Approve");
         var resumed = baseline;
         for (var attempt = 0; attempt < 100; attempt++)
         {
@@ -161,6 +238,72 @@ public sealed class AssetProductionReleaseAcceptanceTests
     }
 
     [Fact]
+    public async Task EvolutionOperator_SeparatesProposalFromExplicitHumanApprovalAndIssuesReceipt()
+    {
+        using var host = new ProductionHostFactory(new HostDatabase(), null, "http://127.0.0.1:1", evolutionEnabled: true);
+        using var client = host.CreateClient();
+        const string intent = "Require critical equipment MES evidence and independent quality sign-off.";
+        var proposal = await AssetProductionEvolutionOperator.ProposeAsync(host.Services, Tenant, intent);
+        proposal.RequestId.Should().NotBeNullOrWhiteSpace();
+        proposal.ReviewTaskId.Should().NotBeNullOrWhiteSpace();
+
+        Func<Task> selfApproval = () => AssetProductionEvolutionOperator.ApproveAsync(
+            host.Services, Tenant, proposal.RequestId, proposal.ReviewTaskId, "asset-evolution-operator");
+        await selfApproval.Should().ThrowAsync<InvalidOperationException>().WithMessage("*different human approver*");
+
+        var receipt = await AssetProductionEvolutionOperator.ApproveAsync(
+            host.Services, Tenant, proposal.RequestId, proposal.ReviewTaskId, "operator-reviewer");
+        var release = AssetProductionRelease.Load(receipt, SigningKey, AssetProductionEvolutionBaseline.GetDescriptors());
+        release.TenantId.Should().Be(Tenant);
+        release.Workflow.Version.Should().Be(AssetProductionDescriptors.WorkflowVersion);
+        release.WorkflowApproval.RequestId.Should().Be(proposal.RequestId);
+    }
+
+    [Fact]
+    public async Task ProductionRelease_CoexistsWithApprovedV2AndResumesItsExactWorkflowPin()
+    {
+        await using var v2Governance = await AssetControlPlaneApprovalHarness.CreateAsync(Tenant);
+        var (v2Task, v2Workflow) = await AssetApprovedReleaseAcceptanceTests.SubmitPairAsync(v2Governance);
+        await v2Governance.CompleteHumanAsync(v2Workflow, "workflow-reviewer", "Approve");
+        var v2Receipt = await v2Governance.IssueApprovedReleaseAsync(v2Task, v2Workflow, SigningKey);
+        await using var v3Governance = await AssetControlPlaneApprovalHarness.CreateAsync(Tenant, additionalBaseline: ProductionBaseline());
+        var v3Workflow = await SubmitProductionWorkflowAsync(v3Governance);
+        await v3Governance.CompleteHumanAsync(v3Workflow, "workflow-reviewer", "Approve");
+        var v3Receipt = await IssueProductionReleaseAsync(v3Governance, v3Workflow);
+        using var mesDatabase = new MesDatabase();
+        await using var mes = await mesDatabase.StartAsync();
+        var database = new HostDatabase();
+        AssetOperationResult inFlight;
+        RuntimeDescriptorPin v2Pin;
+        string finalTaskId;
+        using (var v2Host = new ProductionHostFactory(database, null, mes.BaseAddress, v2Receipt))
+        using (var v2Client = v2Host.CreateClient())
+        {
+            var asset = await RegisterCriticalAssetAsync(v2Client);
+            inFlight = await RequestMaintenanceAsync(v2Client, Tenant, asset.Id);
+            v2Pin = (await ReadWorkflowByIdAsync(v2Host, inFlight.WorkflowInstanceId!)).WorkflowPin;
+            v2Pin.Ref.Version.Should().Be(2);
+            var initial = await PendingTaskAsync(v2Host, inFlight.WorkflowInstanceId!, AssetContractIds.MaintenanceInitialHumanTask);
+            await CompleteAsAsync(v2Client, "supervisor-1", "asset-manager", asset.Id, initial.Id, "Approve");
+            finalTaskId = (await PendingTaskAsync(v2Host, inFlight.WorkflowInstanceId!, AssetContractIds.MaintenanceHumanTask)).Id;
+        }
+
+        using var host = new ProductionHostFactory(database, v3Receipt, mes.BaseAddress, v2Receipt);
+        using var client = host.CreateClient();
+        var registry = host.Services.GetRequiredService<IWorkflowRegistry>();
+        registry.GetByVersion(AssetContractIds.MaintenanceWorkflow, 1).Should().NotBeNull();
+        registry.GetByVersion(AssetContractIds.MaintenanceWorkflow, 2).Should().NotBeNull();
+        registry.GetByVersion(AssetContractIds.MaintenanceWorkflow, 3).Should().NotBeNull();
+        await CompleteAsAsync(client, "supervisor-1", "asset-manager", inFlight.AssetId, finalTaskId, "Approve");
+        await WaitForWorkflowStatusAsync(host, inFlight.WorkflowInstanceId!, WorkflowInstanceStatus.Completed);
+        (await ReadWorkflowByIdAsync(host, inFlight.WorkflowInstanceId!)).WorkflowPin.Should().Be(v2Pin);
+
+        var newAsset = await RegisterCriticalAssetAsync(client);
+        var newOrder = await RequestMaintenanceAsync(client, Tenant, newAsset.Id);
+        (await ReadWorkflowByIdAsync(host, newOrder.WorkflowInstanceId!)).WorkflowPin.Ref.Version.Should().Be(3);
+    }
+
+    [Fact]
     public async Task ProductionRelease_RejectsMissingEvidenceAndSameApprover()
     {
         await using var governance = await AssetControlPlaneApprovalHarness.CreateAsync(Tenant, additionalBaseline: ProductionBaseline());
@@ -176,7 +319,7 @@ public sealed class AssetProductionReleaseAcceptanceTests
         var maintenance = await RequestMaintenanceAsync(client, Tenant, asset.Id);
         var workflowInstance = await ReadWorkflowByIdAsync(host, maintenance.WorkflowInstanceId!);
         var initialTask = await PendingTaskAsync(host, workflowInstance.InstanceId, AssetContractIds.MaintenanceInitialHumanTask);
-        await CompleteAsAsync(host, "supervisor-1", "asset-manager", initialTask.Id, "Approve");
+        await CompleteAsAsync(client, "supervisor-1", "asset-manager", asset.Id, initialTask.Id, "Approve");
         var trialTask = await PendingTaskAsync(host, workflowInstance.InstanceId, AssetProductionDescriptors.TrialTaskId);
         var lockPath = $"api/mes/production-locks/{asset.Id}/{workflowInstance.InstanceId}";
         using var mesClient = mes.Client();
@@ -191,9 +334,9 @@ public sealed class AssetProductionReleaseAcceptanceTests
         trialCompletion.StepResults.Should().Contain(step => step.StepId == AssetProductionDescriptors.TrialStepId &&
             step.HumanTaskOutcome == CompletionCondition.Approve);
         trialTask.HumanTaskId.Should().Be(AssetProductionDescriptors.TrialTaskId);
-        Func<Task> sameApprover = () => CompleteAsAsync(host, "supervisor-1", AssetProductionDescriptors.QualityRole, qualityTask.Id, "Approve");
-        await sameApprover.Should().ThrowAsync<UnauthorizedAccessException>();
-        await CompleteAsAsync(host, "quality-1", AssetProductionDescriptors.QualityRole, qualityTask.Id, "Approve");
+        Func<Task<HttpResponseMessage>> sameApprover = () => CompleteTaskAsync(client, "supervisor-1", AssetProductionDescriptors.QualityRole, asset.Id, qualityTask.Id, "Approve");
+        (await sameApprover()).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await CompleteAsAsync(client, "quality-1", AssetProductionDescriptors.QualityRole, asset.Id, qualityTask.Id, "Approve");
         var releaseInput = new AssetProductionReleaseInput
         {
             AssetId = asset.Id,
@@ -433,6 +576,50 @@ public sealed class AssetProductionReleaseAcceptanceTests
         return (await response.Content.ReadFromJsonAsync<AssetOperationResult>(WireOptions))!;
     }
 
+    private static async Task WaitForWorkflowStatusAsync(ProductionHostFactory host, string workflowId,
+        WorkflowInstanceStatus status)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if ((await ReadWorkflowByIdAsync(host, workflowId)).Status == status)
+                return;
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        (await ReadWorkflowByIdAsync(host, workflowId)).Status.Should().Be(status);
+    }
+
+    private static async Task WaitForAssetStatusAsync(HttpClient client, Guid assetId, string status)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/assets/{assetId}");
+            request.Headers.Add(AssetExecutionIdentity.TenantHeader, Tenant);
+            request.Headers.Add(AssetExecutionIdentity.UserHeader, "asset-user");
+            request.Headers.Add(AssetExecutionIdentity.RolesHeader, "asset-user");
+            request.Headers.Add(AssetExecutionIdentity.DataScopeHeader, "Tenant");
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            if ((await response.Content.ReadFromJsonAsync<AssetResult>(WireOptions))?.Status == status)
+                return;
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        (await ReadAssetAsync(client, assetId)).Status.Should().Be(status);
+    }
+
+    private static async Task<AssetResult> ReadAssetAsync(HttpClient client, Guid assetId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/assets/{assetId}");
+        request.Headers.Add(AssetExecutionIdentity.TenantHeader, Tenant);
+        request.Headers.Add(AssetExecutionIdentity.UserHeader, "asset-user");
+        request.Headers.Add(AssetExecutionIdentity.RolesHeader, "asset-user");
+        request.Headers.Add(AssetExecutionIdentity.DataScopeHeader, "Tenant");
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<AssetResult>(WireOptions))!;
+    }
+
     private static async Task<WorkflowInstance> ReadWorkflowByIdAsync(ProductionHostFactory host, string workflowId, string tenant = Tenant)
     {
         using var scope = host.Services.CreateScope();
@@ -448,11 +635,27 @@ public sealed class AssetProductionReleaseAcceptanceTests
         return tasks.Should().ContainSingle(task => task.HumanTaskId == humanTaskId).Which;
     }
 
-    private static async Task CompleteAsAsync(ProductionHostFactory host, string userId, string role, string taskId, string outcome)
+    private static async Task CompleteAsAsync(HttpClient client, string userId, string role, Guid assetId, string taskId, string outcome)
     {
-        using var scope = host.Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<AssetExecutionIdentity>().Set(Tenant, userId, Organization, DataScope.Tenant, role);
-        await scope.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>().CompleteAsync(taskId, outcome, "Production release acceptance");
+        using var response = await CompleteTaskAsync(client, userId, role, assetId, taskId, outcome);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
+    private static async Task<HttpResponseMessage> CompleteTaskAsync(HttpClient client, string userId, string role, Guid assetId, string taskId, string outcome, string tenantId = Tenant)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/assets/{assetId}/maintenance/tasks/{taskId}/complete");
+        request.Headers.Add(AssetExecutionIdentity.TenantHeader, tenantId);
+        request.Headers.Add(AssetExecutionIdentity.UserHeader, userId);
+        request.Headers.Add(AssetExecutionIdentity.RolesHeader, role);
+        request.Headers.Add(AssetExecutionIdentity.DataScopeHeader, "Tenant");
+        request.Content = JsonContent.Create(new MaintenanceTaskCompletionInput
+        {
+            AssetId = assetId,
+            HumanTaskId = taskId,
+            Outcome = outcome,
+            Note = "Production release acceptance"
+        }, options: WireOptions);
+        return await client.SendAsync(request);
     }
 
     private static async Task<HumanTaskInstance> WaitForPendingTaskAsync(ProductionHostFactory host, string workflowId, string humanTaskId)
@@ -478,7 +681,8 @@ public sealed class AssetProductionReleaseAcceptanceTests
         public string Schema { get; } = $"crest_asset_production_{Guid.NewGuid():N}";
     }
 
-    private sealed class ProductionHostFactory(HostDatabase database, string? receipt, string mesBaseAddress) : WebApplicationFactory<Program>
+    private sealed class ProductionHostFactory(HostDatabase database, string? receipt, string mesBaseAddress,
+        string? approvedReceipt = null, bool evolutionEnabled = false) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -487,13 +691,24 @@ public sealed class AssetProductionReleaseAcceptanceTests
                 ?? throw new InvalidOperationException("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING is required."));
             builder.UseSetting("AssetManagement:RuntimeSchema", database.Schema);
             builder.UseSetting("AssetManagement:DatabasePath", database.Path);
+            if (evolutionEnabled)
+            {
+                builder.UseSetting(AssetProductionEvolutionOperator.EnabledSetting, "true");
+                builder.UseSetting(AssetProductionRelease.SigningKeySetting, SigningKey);
+            }
             if (receipt is not null)
             {
                 builder.UseSetting(AssetProductionRelease.ReceiptSetting, receipt);
                 builder.UseSetting(AssetProductionRelease.SigningKeySetting, SigningKey);
             }
+            if (approvedReceipt is not null)
+            {
+                builder.UseSetting("AssetManagement:ApprovedRelease:Receipt", approvedReceipt);
+                builder.UseSetting("AssetManagement:ApprovedRelease:SigningKey", SigningKey);
+            }
             builder.UseSetting(AssetMesClient.AddressSetting, mesBaseAddress);
             builder.UseSetting($"AssetManagement:Mes:TenantCredentials:{Tenant}", "sample-a");
+            builder.UseSetting($"AssetManagement:Mes:ReleaseCredentials:{Tenant}", "sample-a-release");
         }
     }
 
@@ -501,13 +716,15 @@ public sealed class AssetProductionReleaseAcceptanceTests
     {
         private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("crest-asset-production-mes-");
 
-        public async Task<RunningMes> StartAsync()
+        public async Task<RunningMes> StartAsync(string evidenceMaxAge = "00:30:00")
         {
             var app = CrestCreates.Sample.AssetManagement.Mes.Program.Build([
                 "--urls=http://127.0.0.1:0",
                 "--Logging:LogLevel:Default=Warning",
                 $"--Mes:DatabasePath={System.IO.Path.Combine(_directory.FullName, "mes.db")}",
-                $"--Mes:Tenants:0:TenantId={Tenant}", "--Mes:Tenants:0:BearerToken=sample-a"
+                $"--Mes:EvidenceMaxAge={evidenceMaxAge}",
+                $"--Mes:Tenants:0:TenantId={Tenant}", "--Mes:Tenants:0:BearerToken=sample-a", "--Mes:Tenants:0:Permissions=mes.trial,mes.consume",
+                $"--Mes:Tenants:1:TenantId={Tenant}", "--Mes:Tenants:1:BearerToken=sample-a-release", "--Mes:Tenants:1:Permissions=mes.release"
             ]);
             await app.StartAsync();
             return new RunningMes(app);

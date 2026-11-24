@@ -667,18 +667,31 @@ internal static class AgentOrchestrationNativeScenario
         {
         }
 
-        var durableChild = (await provider.GetRequiredService<IAgentExecutionStore>().FindAsync(key, default))!.Runs[childId];
+        var store = provider.GetRequiredService<IAgentExecutionStore>();
+        var claimedSnapshot = (await store.FindAsync(key, default))!;
+        var durableChild = claimedSnapshot.Runs[childId];
         if (!durableChild.TeamDispatchClaimed || durableChild.Result is not null || worker.Calls != 0)
         {
             throw new InvalidOperationException("The crashed Parallel claim was not recovered fail-closed.");
         }
 
+        var rejectedSnapshot = (await store.FindAsync(key, default))!;
+        if (rejectedSnapshot.Revision != claimedSnapshot.Revision)
+        {
+            throw new InvalidOperationException("The fail-closed Parallel retry changed durable execution state.");
+        }
+
         var confirmed = new AgentRunResult(AgentResultKind.Returned, "ClaimRecovered", Output(childId));
         await coordinator.FinishAsync(key, child, confirmed);
+        var confirmedSnapshot = (await store.FindAsync(key, default))!;
+        if (confirmedSnapshot.Revision <= claimedSnapshot.Revision || confirmedSnapshot.Runs[childId].Result != confirmed)
+            throw new InvalidOperationException("The reconciled Parallel result did not advance durable execution state.");
+        var confirmedRevision = confirmedSnapshot.Revision;
         var replay = AssertSingle((await team.RunParallelAsync(key, owner, [CrashParallelAssignment(childId)])).Steps);
-        if (replay.Result != confirmed || worker.Calls != 0)
+        var replayedSnapshot = (await store.FindAsync(key, default))!;
+        if (replay.Result != confirmed || worker.Calls != 0 || replayedSnapshot.Revision != confirmedRevision)
         {
-            throw new InvalidOperationException("The reconciled Parallel claim did not replay without redispatch.");
+            throw new InvalidOperationException("The reconciled Parallel claim did not replay without redispatch or child writes.");
         }
 
         await coordinator.FinishAsync(key, owner, new(AgentResultKind.Returned, "ParallelRecovered"));
@@ -821,9 +834,13 @@ internal static class AgentOrchestrationNativeScenario
         var offer = new AgentHandoffOffer(Guid.NewGuid(), "recipient", [], []);
         await coordinator.OfferHandoffAsync(key, original, offer);
         await coordinator.AcceptHandoffAsync(key, original.RunId, offer.HandoffId, offer.RecipientAgentId);
+        var before = (await provider.GetRequiredService<IAgentExecutionStore>().FindAsync(key, default))!;
         await RequireFailure<InvalidOperationException>(
             async () => await coordinator.ReserveAsync(key, original, Guid.NewGuid(), new(1, 0)),
             "The prior ownership epoch was accepted after handoff.");
+        var after = (await provider.GetRequiredService<IAgentExecutionStore>().FindAsync(key, default))!;
+        if (after.Revision != before.Revision || after.Runs[original.RunId].Reservations.Count != 0)
+            throw new InvalidOperationException("The old-epoch attempt changed durable state.");
     }
 
     private static async Task RunCrossTenantEventNegativeAsync(PostgreSqlRuntimePersistenceOptions options)
@@ -839,6 +856,8 @@ internal static class AgentOrchestrationNativeScenario
             async () => await coordinator.ResumeAsync(key, owner.RunId, waitId,
                 new("approval", "other-tenant", selector, new("approval-doc", "approval-hash"))),
             "A cross-tenant event was accepted.");
+        if ((await coordinator.ReadRunAsync(key, owner)).Resumptions.Length != 0)
+            throw new InvalidOperationException("A cross-tenant event became durable.");
     }
 
     private static async Task RunDuplicateDispatchNegativeAsync(PostgreSqlRuntimePersistenceOptions options)
@@ -855,6 +874,8 @@ internal static class AgentOrchestrationNativeScenario
         var first = new AgentTeamRunner(coordinator, [new AgentTeamMember("worker", [], firstWorker)])
             .RunParallelAsync(key, owner, [assignment]).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var store = provider.GetRequiredService<IAgentExecutionStore>();
+        var beforeDuplicate = (await store.FindAsync(key, default))!;
         try
         {
             try
@@ -864,6 +885,9 @@ internal static class AgentOrchestrationNativeScenario
             }
             catch (InvalidOperationException exception) when (exception.Message.Contains("requires reconciliation", StringComparison.Ordinal))
             {
+                var afterDuplicate = (await store.FindAsync(key, default))!;
+                if (afterDuplicate.Revision != beforeDuplicate.Revision)
+                    throw new InvalidOperationException("A rejected duplicate dispatch changed durable state.");
                 throw new ExpectedNegativeControlException("A concurrent duplicate team dispatch was rejected.", exception);
             }
         }
@@ -918,7 +942,7 @@ internal static class AgentOrchestrationNativeScenario
         await CreateAsync(coordinator, key);
         var table = $"\"{options.Schema.Replace("\"", "\"\"")}\".agent_executions";
         await using var command = provider.GetRequiredService<NpgsqlDataSource>().CreateCommand(corruptIdentity
-            ? $"update {table} set state_json = jsonb_set(state_json, '{{key,tenantId}}', @tenant::jsonb) where root_run_id = @root;"
+            ? $"update {table} set state_json = to_jsonb(jsonb_set((state_json #>> '{{}}')::jsonb, '{{key,tenantId}}', @tenant::jsonb)::text) where root_run_id = @root;"
             : $"update {table} set revision = revision + 1 where root_run_id = @root;");
         command.Parameters.AddWithValue("root", key.RootRunId);
         if (corruptIdentity)
@@ -942,10 +966,13 @@ internal static class AgentOrchestrationNativeScenario
         var coordinator = Coordinator(provider);
         var key = new AgentExecutionKey("native-agent-tenant", Guid.NewGuid());
         var owner = await CreateAsync(coordinator, key);
+        var before = (await provider.GetRequiredService<IAgentExecutionStore>().FindAsync(key, default))!;
         await RequireFailure<ArgumentException>(
             async () => await coordinator.WaitForEventAsync(key, owner,
                 new(Guid.NewGuid(), new AgentEventSelector("", "approved", "subject"))),
             "An unknown event selector was accepted.");
+        if ((await provider.GetRequiredService<IAgentExecutionStore>().FindAsync(key, default))!.Revision != before.Revision)
+            throw new InvalidOperationException("An unknown selector changed durable state.");
     }
 
     private static async Task RequireFailure<TException>(Func<Task> action, string message) where TException : Exception

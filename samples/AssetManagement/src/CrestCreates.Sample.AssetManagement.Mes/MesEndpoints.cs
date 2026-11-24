@@ -21,27 +21,33 @@ internal static class MesEndpoints
                 throw InvalidRequest("critical_order_required");
 
             return store.Register(Key(context));
-        }));
-        locks.MapGet("", Query(json.ProductionLockState, context => store.GetLock(Key(context))));
+        })).RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Trial));
+        locks.MapGet("", Query(json.ProductionLockState, context => store.GetLock(Key(context))))
+            .RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Trial));
         locks.MapPut("/observations/{observationId:guid}", Command(json.RecordTrialRequest, json.TrialObservation, (context, request) =>
         {
             if (request.Outcome is not (TrialOutcome.Passed or TrialOutcome.Failed) || request.ObservedAt == default)
                 throw InvalidRequest("invalid_trial_observation");
 
             return store.RecordTrial(Key(context), RouteId(context, "observationId"), request);
-        }));
+        })).RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Trial));
         locks.MapGet("/observations/{observationId:guid}",
-            Query(json.TrialObservation, context => store.GetObservation(Key(context), RouteId(context, "observationId"))));
+            Query(json.TrialObservation, context => store.GetObservation(Key(context), RouteId(context, "observationId"))))
+            .RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Trial));
+        locks.MapGet("/observations/{observationId:guid}/release-validation",
+            Query(json.TrialObservation, context => store.ValidateReleaseEvidence(Key(context), RouteId(context, "observationId"))))
+            .RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Release));
         locks.MapPost("/release", Command(json.ReleaseProductionLockRequest, json.ProductionReleaseReceipt, (context, request) =>
         {
             if (request.OperationId == Guid.Empty || request.ObservationId == Guid.Empty || request.SourceEventId == Guid.Empty)
                 throw InvalidRequest("invalid_release_request");
 
             return store.Release(Key(context), request);
-        }));
+        })).RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Release));
         locks.MapGet("/releases/{operationId:guid}", Query(json.ProductionReleaseReceipt, context =>
             store.FindRelease(Key(context), RouteId(context, "operationId"))
-                ?? throw new MesRejection(StatusCodes.Status404NotFound, "release_not_found")));
+                ?? throw new MesRejection(StatusCodes.Status404NotFound, "release_not_found")))
+            .RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Release));
 
         var events = app.MapGroup(MesTrialEventFeed.Path)
             .RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.TenantClaim));
@@ -49,14 +55,14 @@ internal static class MesEndpoints
         {
             context.Response.Headers.CacheControl = "no-store";
             return store.ReadPendingEvents(TenantId(context), ReadEventCursor(context), ReadEventLimit(context));
-        }));
+        })).RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Consume));
         events.MapPut("/{sourceEventId:guid}/ack", (RequestDelegate)(context =>
         {
             context.RequestAborted.ThrowIfCancellationRequested();
             store.AcknowledgeEvent(TenantId(context), RouteId(context, "sourceEventId"));
             context.Response.StatusCode = StatusCodes.Status204NoContent;
             return Task.CompletedTask;
-        }));
+        })).RequireAuthorization(policy => policy.RequireClaim(MesBearerAuthentication.PermissionClaim, MesPermissions.Consume));
     }
 
     private static RequestDelegate Command<TRequest, TResponse>(JsonTypeInfo<TRequest> requestType, JsonTypeInfo<TResponse> responseType,

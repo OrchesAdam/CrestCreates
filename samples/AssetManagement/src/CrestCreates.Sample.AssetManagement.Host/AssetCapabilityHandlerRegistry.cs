@@ -18,6 +18,7 @@ public sealed class AssetCapabilityHandlerRegistry : ICapabilityHandlerRegistry
         [AssetContractIds.TransferCapability] = typeof(TransferAssetHandler),
         [AssetContractIds.RequestMaintenanceCapability] = typeof(RequestMaintenanceHandler),
         [AssetContractIds.ApplyMaintenanceCapability] = typeof(ApplyMaintenanceDecisionHandler),
+        [AssetContractIds.CompleteMaintenanceTaskCapability] = typeof(AssetMaintenanceTaskHandler),
         [AssetProductionDescriptors.ReleaseCapabilityId] = typeof(AssetProductionReleaseHandler)
     };
 }

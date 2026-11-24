@@ -158,7 +158,7 @@ public sealed class AssetApprovedReleaseAcceptanceTests
         await issue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*hashes do not match*");
     }
 
-    private static async Task<(AssetControlPlaneApprovalHarness.ApprovalSubmission Task, AssetControlPlaneApprovalHarness.ApprovalSubmission Workflow)>
+    internal static async Task<(AssetControlPlaneApprovalHarness.ApprovalSubmission Task, AssetControlPlaneApprovalHarness.ApprovalSubmission Workflow)>
         SubmitPairAsync(AssetControlPlaneApprovalHarness governance)
     {
         const string taskIntent = "Asset maintenance initial review";

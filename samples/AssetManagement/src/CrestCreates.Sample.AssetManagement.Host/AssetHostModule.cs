@@ -68,16 +68,19 @@ internal sealed class AssetHostModule : ModuleBase
     private readonly ConfigurationManager _configuration;
     private readonly bool _goldenScenario;
     private readonly bool _candidateGoldenScenario;
+    private readonly bool _evolutionScenario;
     private readonly SqliteAssetStore _assetStore;
 
     public AssetHostModule(
         ConfigurationManager configuration,
         bool goldenScenario,
-        bool candidateGoldenScenario)
+        bool candidateGoldenScenario,
+        bool evolutionScenario)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _goldenScenario = goldenScenario;
         _candidateGoldenScenario = candidateGoldenScenario;
+        _evolutionScenario = evolutionScenario || configuration.GetValue<bool>(AssetProductionEvolutionOperator.EnabledSetting);
 
         var databasePath = configuration["AssetManagement:DatabasePath"]
             ?? Path.Combine(Path.GetTempPath(), $"crestcreates-assets-{Environment.ProcessId}-{Guid.NewGuid():N}.db");
@@ -112,12 +115,14 @@ internal sealed class AssetHostModule : ModuleBase
         var release = receipt is null ? null : AssetApprovedRelease.Load(
             receipt, _configuration[AssetApprovedRelease.SigningKeySetting], baseline);
         var productionReceipt = _configuration[ProductionRelease.AssetProductionRelease.ReceiptSetting];
-        if (productionReceipt is not null && (receipt is not null || _candidateGoldenScenario))
-            throw new InvalidOperationException("An Asset production release cannot be combined with another release profile.");
+        if (productionReceipt is not null && _candidateGoldenScenario)
+            throw new InvalidOperationException("An Asset production release cannot be combined with the candidate golden scenario.");
         var productionRelease = productionReceipt is null ? null : ProductionRelease.AssetProductionRelease.Load(
             productionReceipt, _configuration[ProductionRelease.AssetProductionRelease.SigningKeySetting], productionBaseline);
         IDescriptor[] inventory = productionRelease is not null
-            ? [..productionBaseline, productionRelease.Workflow]
+            ? release is not null
+                ? [..productionBaseline, productionRelease.Workflow, release.Workflow]
+                : [..productionBaseline, productionRelease.Workflow]
             : release is not null
                 ? [..baseline, release.InitialTask, release.Workflow]
                 : _candidateGoldenScenario
@@ -221,6 +226,8 @@ internal sealed class AssetHostModule : ModuleBase
         services.AddSingleton<AssetAgentToolApprovalGate>();
         services.AddSingleton<IAgentToolApprovalGate>(sp => sp.GetRequiredService<AssetAgentToolApprovalGate>());
         services.AddCrestHttpJsonResolver(new AssetCombinedJsonResolver());
+        if (_evolutionScenario)
+            services.AddAssetProductionEvolutionOperator();
     }
 
     public override async Task OnApplicationInitializationAsync(IHost host)

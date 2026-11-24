@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xunit;
 
 namespace CrestCreates.Agent.Orchestration.Tests;
@@ -183,6 +184,121 @@ public sealed class AgentRunCoordinatorTests
         var snapshot = Assert.IsType<AgentExecutionSnapshot>(await _store.FindAsync(_key, default));
         Assert.All(snapshot.Runs.Values, run => Assert.Equal(AgentResultKind.Cancelled, run.Result?.Kind));
         Assert.Equal(default, snapshot.Runs[root.RunId].RemainingBudget);
+    }
+
+    [Fact]
+    public async Task ReconciliationAtomicallyBindsPayloadAndUsageToTheOwnedReservation()
+    {
+        var coordinator = NewCoordinator();
+        var root = await StartAsync(coordinator);
+        var operation = Guid.NewGuid();
+        Assert.True(await coordinator.ReserveAsync(_key, root, operation, new(20, 0)));
+        var decision = new AgentModelDecision(
+            new("asset", JsonSerializer.SerializeToElement(new { Query = "asset" })), null);
+        var reconciliation = new AgentModelTurnReconciliation(12, decision);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ReconcileAsync(
+            _key, root with { Epoch = root.Epoch + 1 }, operation, reconciliation).AsTask());
+        await Assert.ThrowsAsync<ArgumentException>(() => coordinator.ReconcileAsync(
+            _key, root, operation, new AgentModelTurnReconciliation(12, null!)).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ReconcileAsync(
+            _key, root, operation, new AgentToolObservationReconciliation(new("Success", true, null))).AsTask());
+        var pending = (await _store.FindAsync(_key, default))!.Runs[root.RunId];
+        Assert.Null(pending.Reservations[operation].Used);
+        Assert.Equal(new AgentBudget(80, 5), pending.RemainingBudget);
+
+        Assert.True(await coordinator.ReconcileAsync(_key, root, operation, reconciliation));
+        Assert.False(await coordinator.ReconcileAsync(_key, root, operation, reconciliation));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ReconcileAsync(
+            _key, root, operation, reconciliation with { UsedTokens = 13 }).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ReconcileAsync(
+            _key, root, operation, new AgentModelTurnReconciliation(12,
+                new(null, new(AgentResultKind.Returned, "Different")))).AsTask());
+        var settled = (await _store.FindAsync(_key, default))!.Runs[root.RunId];
+        Assert.Equal(new AgentBudget(12, 0), settled.Reservations[operation].Used);
+        var storedDecision = settled.Reservations[operation].ModelDecision!;
+        Assert.Equal(decision.Tool!.Name, storedDecision.Tool!.Name);
+        Assert.True(JsonElement.DeepEquals(decision.Tool.Arguments!.Value, storedDecision.Tool.Arguments!.Value));
+        Assert.Equal(new AgentBudget(88, 5), settled.RemainingBudget);
+
+        var usageOnly = Guid.NewGuid();
+        Assert.True(await coordinator.ReserveAsync(_key, root, usageOnly, new(0, 1)));
+        Assert.True(await coordinator.SettleAsync(_key, root, usageOnly, new(0, 1)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ReconcileAsync(
+            _key, root, usageOnly, new AgentToolObservationReconciliation(new("Success", true, null))).AsTask());
+    }
+
+    [Fact]
+    public async Task PlanRejectsRootUnrelatedAndMismatchedExistingRunIds()
+    {
+        var coordinator = NewCoordinator();
+        var root = await StartAsync(coordinator);
+        var own = new AgentRunAssignment(Guid.NewGuid(), "asset", "Check asset", new(10, 1), ["asset"], [_asset]);
+        var child = Assert.Single(await coordinator.StartChildrenAsync(_key, root, [own]));
+        var nested = new AgentRunAssignment(Guid.NewGuid(), "nested", "Nested check", new(1, 0), [], []);
+        await coordinator.StartChildrenAsync(_key, child, [nested]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, 0, [own with { RunId = root.RunId }]).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, 0, [nested]).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, 0, [own with { Task = "Different assignment" }]).AsTask());
+        var plan = await coordinator.SetPlanAsync(_key, root, 0, [own]);
+        Assert.Equal(own, Assert.Single(plan.Steps));
+    }
+
+    [Fact]
+    public async Task PlanStartedPrefixUsesOwnerBindingRatherThanMereIdPresence()
+    {
+        var coordinator = NewCoordinator();
+        var root = await StartAsync(coordinator);
+        var first = new AgentRunAssignment(Guid.NewGuid(), "asset", "First", new(10, 1), ["asset"], [_asset]);
+        var collision = new AgentRunAssignment(Guid.NewGuid(), "mes", "Planned second", new(10, 1), [], []);
+        var plan = await coordinator.SetPlanAsync(_key, root, 0, [first, collision]);
+        await coordinator.StartChildrenAsync(_key, root, [first]);
+        var otherParent = Assert.Single(await coordinator.StartChildrenAsync(_key, root,
+            [new(Guid.NewGuid(), "asset", "Other parent", new(20, 1), ["asset"], [_asset])]));
+        await coordinator.StartChildrenAsync(_key, otherParent, [collision]);
+
+        var replacement = collision with { RunId = Guid.NewGuid(), Task = "Replacement second" };
+        var revised = await coordinator.SetPlanAsync(_key, root, plan.Version, [first, replacement]);
+        Assert.Equal(replacement, revised.Steps[1]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, revised.Version, [first with { Task = "Rewritten" }, replacement]).AsTask());
+    }
+
+    [Fact]
+    public async Task PlanProtectsStartedStepsEvenWhenAnEarlierStepWasNotStarted()
+    {
+        var coordinator = NewCoordinator();
+        var root = await StartAsync(coordinator);
+        var first = new AgentRunAssignment(Guid.NewGuid(), "asset", "First", new(10, 1), ["asset"], [_asset]);
+        var second = new AgentRunAssignment(Guid.NewGuid(), "asset", "Second", new(10, 1), ["asset"], [_asset]);
+        var plan = await coordinator.SetPlanAsync(_key, root, 0, [first, second]);
+        await coordinator.StartChildrenAsync(_key, root, [second]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, plan.Version, [first]).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, plan.Version, [second, first]).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.SetPlanAsync(
+            _key, root, plan.Version, [first, second with { Task = "Rewritten" }]).AsTask());
+    }
+
+    [Fact]
+    public async Task LegacyStringDiscussionReopenIsIdempotentButCannotGainAssignments()
+    {
+        var coordinator = NewCoordinator();
+        var root = await StartAsync(coordinator);
+        var discussionId = Guid.NewGuid();
+        var opened = await coordinator.OpenDiscussionAsync(_key, root, discussionId, ["asset"], 2);
+
+        var reopened = await coordinator.OpenDiscussionAsync(_key, root, discussionId, ["asset"], 2);
+        Assert.Equal(opened, reopened);
+        var assignment = new AgentRunAssignment(Guid.NewGuid(), "asset", "Discuss", new(1, 0), [], []);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.OpenDiscussionAsync(
+            _key, root, discussionId, [assignment], 2).AsTask());
     }
 
     private AgentRunCoordinator NewCoordinator() => new(_store, TimeProvider.System);

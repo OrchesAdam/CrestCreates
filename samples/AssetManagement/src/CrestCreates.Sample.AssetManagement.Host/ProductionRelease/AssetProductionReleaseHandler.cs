@@ -23,9 +23,10 @@ internal sealed class AssetProductionReleaseHandler : ICapabilityContextAwareHan
             throw new CapabilityFailureException("ASSET_PRODUCTION_RELEASE_CONTEXT_INVALID", "The production release requires its typed input and tenant.");
         }
 
+        var assetApplication = context.ServiceProvider.GetRequiredService<AssetApplicationService>();
         var workflows = context.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>();
         var state = context.ServiceProvider.GetRequiredService<IRuntimeStateContractRegistry>();
-        var assets = context.ServiceProvider.GetRequiredService<IAssetStore>();
+        var assetStore = context.ServiceProvider.GetRequiredService<IAssetStore>();
         var mes = context.ServiceProvider.GetRequiredService<AssetMesClient>();
         var workflow = await workflows.GetAsync(new RuntimeInstanceKey(tenantId, input.WorkflowInstanceId), ct);
         if (workflow is null || workflow.Status != WorkflowInstanceStatus.Completed ||
@@ -37,7 +38,9 @@ internal sealed class AssetProductionReleaseHandler : ICapabilityContextAwareHan
             throw new CapabilityFailureException("ASSET_PRODUCTION_RELEASE_WORKFLOW_INVALID", "The production release requires a completed approved critical maintenance workflow for this asset.");
         }
 
-        var asset = await assets.GetAsync(tenantId, input.AssetId, ct);
+        _ = await assetApplication.GetAsync(input.AssetId, tenantId, ct)
+            ?? throw new CapabilityFailureException("ASSET_NOT_VISIBLE", "The production asset is outside the caller's data scope.");
+        var asset = await assetStore.GetAsync(tenantId, input.AssetId, ct);
         if (asset is null || asset.Category != AssetProductionDescriptors.CriticalCategory ||
             asset.Status is not (Domain.AssetStatus.Available or Domain.AssetStatus.Assigned))
         {
@@ -122,6 +125,9 @@ internal sealed class AssetProductionCapabilityModule : ICapabilityHandlerModule
 {
     public string Id => "asset-production-release";
 
-    public void Apply(CapabilityHandlerResolver resolver) =>
+    public void Apply(CapabilityHandlerResolver resolver)
+    {
         resolver.Register(AssetProductionDescriptors.ReleaseCapabilityId, new AssetProductionReleaseHandler());
+        resolver.Register(AssetContractIds.CompleteMaintenanceTaskCapability, new AssetMaintenanceTaskHandler());
+    }
 }

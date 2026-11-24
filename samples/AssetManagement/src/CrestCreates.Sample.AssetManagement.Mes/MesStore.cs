@@ -129,6 +129,21 @@ internal sealed class MesStore(string connectionString, TimeProvider clock, Time
         return new TrialObservation(key.TenantId, key.EquipmentId, key.WorkOrderId, observationId, sourceEventId, request.Outcome, observedAt);
     }
 
+    public TrialObservation ValidateReleaseEvidence(ProductionLockKey key, Guid observationId)
+    {
+        using var connection = Open();
+        var state = FindLock(connection, null, key) ?? throw LockNotFound();
+        if (!state.IsLocked)
+            throw new MesRejection(StatusCodes.Status409Conflict, "lock_already_released");
+        var evidence = RequireMatchingEvidence(key, FindObservation(connection, null, key.TenantId, observationId));
+        if (evidence.Outcome != TrialOutcome.Passed)
+            throw new MesRejection(StatusCodes.Status409Conflict, "evidence_failed");
+        var now = clock.GetUtcNow().ToUniversalTime();
+        if (evidence.ObservedAt < state.RegisteredAt || evidence.ObservedAt > now || now - evidence.ObservedAt > evidenceMaxAge)
+            throw new MesRejection(StatusCodes.Status409Conflict, "evidence_outside_freshness_window");
+        return evidence;
+    }
+
     public ProductionReleaseReceipt Release(ProductionLockKey key, ReleaseProductionLockRequest request)
     {
         using var connection = Open();

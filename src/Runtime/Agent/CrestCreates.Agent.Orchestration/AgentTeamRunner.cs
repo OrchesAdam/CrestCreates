@@ -75,11 +75,11 @@ public sealed class AgentTeamRunner
     {
         ValidateAssignments(participants);
         var discussion = await _coordinator.OpenDiscussionAsync(key, moderator, discussionId,
-            [.. participants.Select(item => item.AgentId)], maxTurns, cancellationToken);
+            participants, maxTurns, cancellationToken);
         while (!discussion.Closed)
         {
             var round = discussion.Messages.Length;
-            var participant = participants[round % participants.Length];
+            var participant = discussion.Assignments[round % discussion.Assignments.Length];
             var assignment = participant with
             {
                 RunId = SpeakerRunId(discussionId, round),
@@ -140,8 +140,8 @@ public sealed class AgentTeamRunner
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         stop.Token.ThrowIfCancellationRequested();
         var result = await member.Worker.RunAsync(context, stop.Token);
-        stop.Token.ThrowIfCancellationRequested();
-        await _coordinator.FinishTeamChildAsync(key, owner, result, stop.Token);
+        await _coordinator.FinishTeamChildAsync(key, owner, result, deadline.Token);
+        cancellationToken.ThrowIfCancellationRequested();
         return new(owner.RunId, owner.AgentId, result);
     }
 

@@ -42,6 +42,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(AgentToolBudgetRequirement))]
 [JsonSerializable(typeof(AgentExecutionContext))]
 [JsonSerializable(typeof(AgentExecutionSnapshot))]
+[JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(AgentToolInvocationAbandonedReceipt))]
 [JsonSerializable(typeof(AgentToolInvocationPrepareCompletionRequest))]
 [JsonSerializable(typeof(AgentToolInvocationPrepareReleaseRequest))]

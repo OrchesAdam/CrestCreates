@@ -264,16 +264,23 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
         AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
         Services = services
     });
-    var acceptance = await services.GetRequiredService<IWorkflowContinuationAcceptanceStore>()
-        .GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
+    var acceptanceStore = services.GetRequiredService<IWorkflowContinuationAcceptanceStore>();
+    var acceptance = await acceptanceStore.GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
     var humanTaskAck = await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease);
+    var resumeReplay = acceptance is null
+        ? (WorkflowContinuationResumeClaimResult.AcceptanceMissing, (WorkflowContinuationResumeClaim?)null)
+        : await acceptanceStore.TryClaimResumeAsync(acceptance, new WorkflowContinuationResumeLease(
+            "aot-continuation-replay", claim.Lease.Fence + 1, claim.Lease.ExpiresAt));
     if (deliveryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
         || acceptance is null
+        || acceptance.RunOperationId != completed.CompletionEventId
+        || resumeReplay.Item1 != WorkflowContinuationResumeClaimResult.NoResumeRequired
         || humanTaskAck is not OutboxDeliveryMutationResult.Applied)
     {
         return 9;
     }
     Console.WriteLine("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+    Console.WriteLine("CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK");
     Console.WriteLine("CRESTCREATES_RUNTIME_OUTBOX_OK");
     Console.WriteLine("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
 

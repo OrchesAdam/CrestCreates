@@ -12,6 +12,7 @@ public sealed class AssetMesClient(IHttpClientFactory clients, IConfiguration co
     public const string ClientName = "asset-maintenance-mes";
     public const string AddressSetting = "AssetManagement:Mes:BaseAddress";
     private const string TenantCredentials = "AssetManagement:Mes:TenantCredentials";
+    private const string ReleaseCredentials = "AssetManagement:Mes:ReleaseCredentials";
 
     public async Task<ProductionLockState> RegisterAsync(string tenantId, Guid equipmentId, string workOrderId, CancellationToken cancellationToken)
     {
@@ -49,10 +50,26 @@ public sealed class AssetMesClient(IHttpClientFactory clients, IConfiguration co
         return observation;
     }
 
+    public async Task<TrialObservation> ValidateReleaseEvidenceAsync(string tenantId, Guid equipmentId, string workOrderId,
+        Guid observationId, CancellationToken cancellationToken)
+    {
+        using var request = Request(HttpMethod.Get, tenantId, equipmentId, workOrderId,
+            $"/observations/{observationId:D}/release-validation", release: true);
+        var observation = await SendAsync(request, MesJsonContext.Default.TrialObservation, cancellationToken);
+        RequireScope(observation.TenantId, observation.EquipmentId, observation.WorkOrderId, tenantId, equipmentId, workOrderId);
+        if (observation.ObservationId != observationId || observation.SourceEventId == Guid.Empty ||
+            observation.Outcome != TrialOutcome.Passed)
+        {
+            throw InvalidEvidence();
+        }
+
+        return observation;
+    }
+
     public async Task<ProductionReleaseReceipt> ReleaseAsync(string tenantId, Guid equipmentId, string workOrderId,
         ReleaseProductionLockRequest command, CancellationToken cancellationToken)
     {
-        using var request = Request(HttpMethod.Post, tenantId, equipmentId, workOrderId, "/release");
+        using var request = Request(HttpMethod.Post, tenantId, equipmentId, workOrderId, "/release", release: true);
         request.Content = JsonContent.Create(command, MesJsonContext.Default.ReleaseProductionLockRequest);
         var receipt = await SendAsync(request, MesJsonContext.Default.ProductionReleaseReceipt, cancellationToken);
         var evidence = receipt.Evidence;
@@ -69,7 +86,7 @@ public sealed class AssetMesClient(IHttpClientFactory clients, IConfiguration co
     public async Task<ProductionReleaseReceipt?> FindReleaseAsync(string tenantId, Guid equipmentId, string workOrderId,
         Guid operationId, CancellationToken cancellationToken)
     {
-        using var request = Request(HttpMethod.Get, tenantId, equipmentId, workOrderId, $"/releases/{operationId:D}");
+        using var request = Request(HttpMethod.Get, tenantId, equipmentId, workOrderId, $"/releases/{operationId:D}", release: true);
         using var client = clients.CreateClient(ClientName);
         using var response = await client.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
@@ -90,13 +107,15 @@ public sealed class AssetMesClient(IHttpClientFactory clients, IConfiguration co
         return receipt;
     }
 
-    private HttpRequestMessage Request(HttpMethod method, string tenantId, Guid equipmentId, string workOrderId, string suffix = "")
+    private HttpRequestMessage Request(HttpMethod method, string tenantId, Guid equipmentId, string workOrderId, string suffix = "", bool release = false)
     {
-        var credential = configuration.GetSection(TenantCredentials).GetChildren()
+        var credential = configuration.GetSection(release ? ReleaseCredentials : TenantCredentials).GetChildren()
             .SingleOrDefault(tenant => string.Equals(tenant.Key, tenantId, StringComparison.Ordinal))?.Value;
         if (string.IsNullOrWhiteSpace(credential))
         {
-            throw new CapabilityFailureException("ASSET_MES_TENANT_NOT_CONFIGURED", "The tenant has no MES service credential.");
+            throw new CapabilityFailureException("ASSET_MES_TENANT_NOT_CONFIGURED", release
+                ? "The tenant has no MES release credential."
+                : "The tenant has no MES service credential.");
         }
 
         var request = new HttpRequestMessage(method, $"api/mes/production-locks/{equipmentId:D}/{Uri.EscapeDataString(workOrderId)}{suffix}")

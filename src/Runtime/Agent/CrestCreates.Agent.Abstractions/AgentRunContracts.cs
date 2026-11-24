@@ -46,6 +46,14 @@ public sealed record AgentModelDecision(AgentToolSelection? Tool, AgentRunResult
 
 public sealed record AgentToolObservation(string Code, bool Succeeded, JsonElement? StructuredOutput);
 
+public abstract record AgentOperationReconciliation;
+
+public sealed record AgentModelTurnReconciliation(long UsedTokens, AgentModelDecision Decision)
+    : AgentOperationReconciliation;
+
+public sealed record AgentToolObservationReconciliation(AgentToolObservation Observation)
+    : AgentOperationReconciliation;
+
 public sealed record AgentArtifactReference(string Id, string ContentHash);
 
 public sealed record AgentRunAssignment(
@@ -131,7 +139,10 @@ public sealed record AgentPlanSnapshot(
 
 public sealed record AgentDiscussionSnapshot(
     Guid DiscussionId, long OwnerEpoch, int MaxTurns,
-    ImmutableArray<string> Participants, ImmutableArray<AgentDiscussionMessage> Messages, bool Closed = false);
+    ImmutableArray<string> Participants, ImmutableArray<AgentDiscussionMessage> Messages, bool Closed = false)
+{
+    public ImmutableArray<AgentRunAssignment> Assignments { get; init; } = [];
+}
 
 public sealed record AgentDiscussionMessage(Guid SpeakerRunId, string AgentId, AgentArtifactReference Artifact);
 

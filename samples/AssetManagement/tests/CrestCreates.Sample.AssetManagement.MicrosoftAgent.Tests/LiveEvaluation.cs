@@ -89,7 +89,8 @@ internal static class LiveModelProtocol
             throw new InvalidOperationException("The live parent model operation has already been claimed.");
         }
 
-        var completion = await model.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        var completion = await model.CompleteAsync(
+            systemPrompt, userPrompt, new MicrosoftAgentCoordinationCallOptions(allocation), cancellationToken);
         if (!await coordinator.SettleAsync(context.Execution, context.Owner, operation,
                 new(completion.Usage.TotalTokenCount!.Value, 0), cancellationToken))
         {
@@ -99,7 +100,8 @@ internal static class LiveModelProtocol
         return completion;
     }
 
-    public static AgentRunResult ReadResult(string text, Guid runId, string purpose)
+    public static AgentRunResult ReadResult(
+        string text, Guid runId, string purpose, string expectedCode, string requiredEvidence)
     {
         using var document = JsonDocument.Parse(text);
         var root = document.RootElement;
@@ -112,6 +114,16 @@ internal static class LiveModelProtocol
             string.IsNullOrWhiteSpace(resultText))
         {
             throw new InvalidOperationException("The live model returned an invalid terminal result.");
+        }
+
+        if (!string.Equals(resultCode, expectedCode, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"The live model returned result code '{resultCode}' instead of '{expectedCode}'.");
+        }
+
+        if (!resultText.Contains(requiredEvidence, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"The live model returned a terminal result without required evidence '{requiredEvidence}'.");
         }
 
         return new(AgentResultKind.Returned, resultCode, Artifact($"{purpose}-{runId:N}", resultText));
@@ -177,7 +189,7 @@ internal static class LiveModelProtocol
         return (recipientId, summaryText);
     }
 
-    public static AgentEventSelector ReadWait(string text)
+    public static AgentEventSelector ReadWait(string text, AgentEventSelector expected)
     {
         using var document = JsonDocument.Parse(text);
         var root = document.RootElement;
@@ -191,7 +203,13 @@ internal static class LiveModelProtocol
             throw new InvalidOperationException("The live reviewer returned an invalid event wait.");
         }
 
-        return new(sourceId, kindId, subjectId);
+        var selector = new AgentEventSelector(sourceId, kindId, subjectId);
+        if (selector != expected)
+        {
+            throw new InvalidOperationException("The live reviewer returned an event selector not owned by the fixture.");
+        }
+
+        return selector;
     }
 
     public static AgentArtifactReference Artifact(string id, string text) =>

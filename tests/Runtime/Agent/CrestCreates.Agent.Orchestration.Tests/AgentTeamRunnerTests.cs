@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Xunit;
 
 namespace CrestCreates.Agent.Orchestration.Tests;
@@ -232,6 +233,30 @@ public sealed class AgentTeamRunnerTests
     }
 
     [Fact]
+    public async Task CallerCancellationAfterWorkerReturnStillPersistsTheConfirmedChildResult()
+    {
+        var (coordinator, owner) = await StartAsync();
+        using var caller = new CancellationTokenSource();
+        var calls = 0;
+        var worker = new AsyncWorker((context, token) =>
+        {
+            calls++;
+            caller.Cancel();
+            return ValueTask.FromResult(Returned(AssetFinding));
+        });
+        var assignment = Step("asset");
+        var runner = new AgentTeamRunner(coordinator, [new("asset", [], worker)]);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            runner.RunParallelAsync(_key, owner, [assignment], caller.Token).AsTask());
+        var confirmed = Returned(AssetFinding);
+        Assert.Equal(confirmed, Assert.Single(await coordinator.ReadChildResultsAsync(_key, owner, [assignment.RunId])));
+        var replay = Assert.Single((await runner.RunParallelAsync(_key, owner, [assignment])).Steps);
+        Assert.Equal(confirmed, replay.Result);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public async Task GroupDiscussionOnlySharesPublishedMessagesAndStopsAtItsTurnLimit()
     {
         var (coordinator, owner) = await StartAsync();
@@ -261,6 +286,67 @@ public sealed class AgentTeamRunnerTests
             _key, owner, discussionId, 3, [.. participants]).AsTask());
     }
 
+    [Theory]
+    [InlineData("task")]
+    [InlineData("budget")]
+    [InlineData("tools")]
+    [InlineData("inputs")]
+    public async Task GroupDiscussionResumeRejectsChangedParticipantAssignments(string changedField)
+    {
+        var (_, owner) = await StartAsync(inputs: ImmutableArray.Create(AssetFinding));
+        var maintenanceCalls = 0;
+        var qualityCalls = 0;
+        var maintenance = new Worker(context =>
+        {
+            maintenanceCalls++;
+            Assert.Equal(AssetFinding, Assert.Single(context.Inputs));
+            return Returned(MesFinding);
+        });
+        var quality = new Worker(context =>
+        {
+            qualityCalls++;
+            Assert.Equal(AssetFinding, context.Inputs[0]);
+            Assert.Equal(MesFinding, context.Inputs[1]);
+            return Returned(AssetFinding);
+        });
+        var members = new[]
+        {
+            new AgentTeamMember("maintenance", ["asset.read"], maintenance),
+            new AgentTeamMember("quality", ["asset.read"], quality)
+        };
+        var participants = ImmutableArray.Create(
+            Step("maintenance") with { Task = "Maintenance assignment", Inputs = [AssetFinding] },
+            Step("quality") with { Task = "Quality assignment", Inputs = [AssetFinding] });
+        var discussionId = Guid.NewGuid();
+        var interrupting = new AgentRunCoordinator(new InterruptSecondDiscussionChildStore(_store), TimeProvider.System);
+        await Assert.ThrowsAsync<IOException>(() => new AgentTeamRunner(interrupting, members)
+            .RunDiscussionAsync(_key, owner, discussionId, 2, participants).AsTask());
+        var stored = (await interrupting.ReadRunAsync(_key, owner)).Discussion!;
+        Assert.Equal(participants, stored.Assignments);
+        Assert.Single(stored.Messages);
+        Assert.Equal(1, maintenanceCalls);
+        Assert.Equal(0, qualityCalls);
+
+        var changed = participants.SetItem(0, participants[0] with
+        {
+            Task = changedField == "task" ? "Changed task" : participants[0].Task,
+            Budget = changedField == "budget" ? new(11, 1) : participants[0].Budget,
+            Tools = changedField == "tools" ? ["asset.read"] : participants[0].Tools,
+            Inputs = changedField == "inputs" ? [] : participants[0].Inputs
+        });
+        var restarted = new AgentTeamRunner(new AgentRunCoordinator(_store, TimeProvider.System), members);
+        var conflict = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            restarted.RunDiscussionAsync(_key, owner, discussionId, 2, changed).AsTask());
+        Assert.Contains("different discussion", conflict.Message);
+        Assert.Equal(0, qualityCalls);
+
+        var resumed = await restarted.RunDiscussionAsync(_key, owner, discussionId, 2, participants);
+        Assert.True(resumed.Closed);
+        Assert.Equal([MesFinding, AssetFinding], resumed.Messages.Select(message => message.Artifact).ToArray());
+        Assert.Equal(1, maintenanceCalls);
+        Assert.Equal(1, qualityCalls);
+    }
+
     [Fact]
     public async Task AgentWorkflowAndCapabilityReportSeparateOutcomes()
     {
@@ -280,18 +366,40 @@ public sealed class AgentTeamRunnerTests
         Assert.Equal(AgentCapabilityCommit.Rejected, state.Capabilities[uncertain.ExecutionId].Commit);
     }
 
-    private async Task<(AgentRunCoordinator, AgentRunOwner)> StartAsync(TimeProvider? clock = null)
+    private async Task<(AgentRunCoordinator, AgentRunOwner)> StartAsync(
+        TimeProvider? clock = null, ImmutableArray<AgentArtifactReference>? inputs = null)
     {
         clock ??= TimeProvider.System;
         var coordinator = new AgentRunCoordinator(_store, clock);
         var owner = await coordinator.StartAsync(_key, "engineer", clock.GetUtcNow().AddMinutes(2),
-            new(_key.RootRunId, "root", "Review change", new(100, 20), ["asset.read", "mes.read"], []));
+            new(_key.RootRunId, "root", "Review change", new(100, 20), ["asset.read", "mes.read"], inputs ?? []));
         return (coordinator, owner);
     }
 
     private static AgentRunAssignment Step(string agentId) => new(Guid.NewGuid(), agentId, "Check proposal", new(10, 1), [], []);
 
     private static AgentRunResult Returned(AgentArtifactReference artifact) => new(AgentResultKind.Returned, "Report", artifact);
+
+    private sealed class InterruptSecondDiscussionChildStore(IAgentExecutionStore inner) : IAgentExecutionStore
+    {
+        public ValueTask<AgentExecutionSnapshot?> FindAsync(AgentExecutionKey key, CancellationToken cancellationToken) =>
+            inner.FindAsync(key, cancellationToken);
+
+        public ValueTask<bool> TryCreateAsync(AgentExecutionSnapshot execution, CancellationToken cancellationToken) =>
+            inner.TryCreateAsync(execution, cancellationToken);
+
+        public ValueTask<bool> TryReplaceAsync(AgentExecutionSnapshot execution, long expectedRevision,
+            CancellationToken cancellationToken)
+        {
+            var root = execution.Runs[execution.Key.RootRunId];
+            if (root.Discussion is { Messages.Length: 1 } && execution.Runs.Count == 3)
+            {
+                throw new IOException("Interrupted before the second discussion child was stored.");
+            }
+
+            return inner.TryReplaceAsync(execution, expectedRevision, cancellationToken);
+        }
+    }
 
     private sealed class DeadlineClock : TimeProvider
     {

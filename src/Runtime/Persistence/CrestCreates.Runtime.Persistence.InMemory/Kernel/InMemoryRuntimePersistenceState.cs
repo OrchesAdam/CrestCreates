@@ -17,6 +17,7 @@ internal sealed class InMemoryRuntimePersistenceState
     public Dictionary<(RuntimeTenantScope Scope, string Operation), WorkflowAbortReceipt> AbortReceipts { get; } = new();
     public Dictionary<string, InMemoryOutboxRecord> Outbox { get; } = new(StringComparer.Ordinal);
     public Dictionary<(RuntimeTenantScope Scope, string CompletionEventId), WorkflowContinuationAcceptance> ContinuationAcceptances { get; } = new();
+    public Dictionary<(RuntimeTenantScope Scope, string CompletionEventId), InMemoryContinuationResumeClaim> ContinuationResumeClaims { get; } = new();
 
     public InMemoryRuntimePersistenceState Clone()
     {
@@ -35,8 +36,24 @@ internal sealed class InMemoryRuntimePersistenceState
             clone.Outbox[key] = value.Clone();
         foreach (var (key, value) in ContinuationAcceptances)
             clone.ContinuationAcceptances[key] = value;
+        foreach (var (key, value) in ContinuationResumeClaims)
+            clone.ContinuationResumeClaims[key] = new InMemoryContinuationResumeClaim
+            {
+                Version = value.Version,
+                OwnerId = value.OwnerId,
+                ExpiresAt = value.ExpiresAt,
+                CompletedAt = value.CompletedAt
+            };
         return clone;
     }
+}
+
+internal sealed class InMemoryContinuationResumeClaim
+{
+    public long Version { get; set; }
+    public string? OwnerId { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
 }
 
 internal sealed class InMemoryOutboxRecord

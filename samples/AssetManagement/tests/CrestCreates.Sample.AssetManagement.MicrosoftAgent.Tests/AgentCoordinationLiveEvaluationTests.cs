@@ -17,8 +17,9 @@ public sealed class AgentCoordinationLiveEvaluationTests
     public Task ReAct_UsesRealModelToolLoopAndSeparatesAgentCompletion() =>
         RunAsync("react", async (evaluation, token) =>
         {
+            const string observationMarker = "MES_PASS";
             var root = await StartRootAsync(evaluation, "engineer",
-                "Call mes.read exactly once with {\"workOrderId\":\"WO-LIVE-7\"}, then return ReportReady with text containing MES_PASS.",
+                "Call mes.read exactly once with {\"workOrderId\":\"WO-LIVE-7\"}, then return ReportReady with text containing the observation code from the tool result.",
                 new(100000, 3), ["mes.read"], [], token);
             var tools = new LiveToolExecutor();
             var result = await new AgentReActRunner(evaluation.Coordinator, TimeProvider.System).RunAsync(
@@ -32,7 +33,14 @@ public sealed class AgentCoordinationLiveEvaluationTests
             Assert.Equal("mes.read", tools.Selection!.Name);
             Assert.Equal("WO-LIVE-7", tools.Selection.Arguments!.Value.GetProperty("workOrderId").GetString());
             Assert.Equal(2, evaluation.ModelCalls.Count);
-            Assert.Contains("MES_PASS", evaluation.ModelCalls[1].Messages.Single(message => message.Role == "user").Text);
+            Assert.All(evaluation.ModelCalls[0].Messages, message =>
+                Assert.DoesNotContain(observationMarker, message.Text, StringComparison.Ordinal));
+            Assert.Contains(observationMarker,
+                evaluation.ModelCalls[1].Messages.Single(message => message.Role == "user").Text, StringComparison.Ordinal);
+            var observedResult = LiveModelProtocol.ReadResult(
+                evaluation.ModelCalls[1].ResponseText, root.RunId, "react", "ReportReady", observationMarker);
+            Assert.Equal(observedResult.Code, result.Code);
+            Assert.Equal(observedResult.Output!.ContentHash, result.Output!.ContentHash);
             var snapshot = (await evaluation.Store.FindAsync(evaluation.Key, default))!;
             var run = snapshot.Runs[root.RunId];
             Assert.Equal(3, run.Reservations.Count);
@@ -203,12 +211,10 @@ public sealed class AgentCoordinationLiveEvaluationTests
         RunAsync("handoff", async (evaluation, token) =>
         {
             var privateInput = LiveModelProtocol.Artifact("triage-private", "TRIAGE_PRIVATE_INPUT");
-            var summaryArtifact = LiveModelProtocol.Artifact("handoff-summary", "pending-summary");
             evaluation.Artifacts[privateInput.Id] = "TRIAGE_PRIVATE_INPUT";
-            evaluation.Artifacts[summaryArtifact.Id] = "pending-summary";
             var root = await StartRootAsync(evaluation, "triage",
                 "Triage the asset and hand off to quality with a concise summary.", new(100000, 6),
-                ["asset.read"], [privateInput, summaryArtifact], token);
+                ["asset.read"], [privateInput], token);
             var context = await evaluation.Coordinator.ReadContextAsync(evaluation.Key, root, token);
             var completion = await LiveModelProtocol.CompleteMeteredAsync(evaluation.Model, evaluation.Coordinator, context,
                 "handoff", "You are a CrestCreates triage agent. Return strict JSON only.",
@@ -216,6 +222,7 @@ public sealed class AgentCoordinationLiveEvaluationTests
                     "Private triage input: Pump 7 vibration exceeds the approved threshold; quality review is required before release.",
                     "Return exactly {\"recipient\":\"quality\",\"summary\":\"<concise handoff summary>\"}."), token);
             var (recipient, summary) = LiveModelProtocol.ReadHandoff(completion.Text);
+            var summaryArtifact = LiveModelProtocol.Artifact("handoff-summary", summary);
             evaluation.Artifacts[summaryArtifact.Id] = summary;
             var offer = new AgentHandoffOffer(Guid.NewGuid(), recipient, [], [summaryArtifact]);
             await evaluation.Coordinator.OfferHandoffAsync(evaluation.Key, root, offer, token);
@@ -289,6 +296,7 @@ public sealed class AgentCoordinationLiveEvaluationTests
     public Task HumanInTheLoop_WaitsForDurableEventThenResumesRealModel() =>
         RunAsync("human-in-the-loop", async (evaluation, token) =>
         {
+            var expectedSelector = new AgentEventSelector("human-task", "decided", "approval-live-1");
             var root = await StartRootAsync(evaluation, "reviewer",
                 "Wait for human approval before finalizing the release.", new(100000, 6), [], [], token);
             var context = await evaluation.Coordinator.ReadContextAsync(evaluation.Key, root, token);
@@ -296,8 +304,8 @@ public sealed class AgentCoordinationLiveEvaluationTests
                 "wait", "You are a CrestCreates human-in-the-loop reviewer. Return strict JSON only.",
                 string.Join("\n",
                     "Return exactly {\"wait\":{\"source\":\"human-task\",\"kind\":\"decided\",\"subjectId\":\"approval-live-1\"}}."), token);
-            var selector = LiveModelProtocol.ReadWait(first.Text);
-            var wait = new AgentEventWait(Guid.NewGuid(), selector);
+            var selector = LiveModelProtocol.ReadWait(first.Text, expectedSelector);
+            var wait = new AgentEventWait(Guid.NewGuid(), expectedSelector);
             await evaluation.Coordinator.WaitForEventAsync(evaluation.Key, root, wait, token);
             var waiting = (await evaluation.Store.FindAsync(evaluation.Key, default))!;
             Assert.Null(waiting.Runs[root.RunId].Result);
@@ -309,17 +317,26 @@ public sealed class AgentCoordinationLiveEvaluationTests
             Assert.False(await evaluation.Coordinator.ResumeAsync(evaluation.Key, root.RunId, wait.WaitId, delivery, token));
             var resumed = await evaluation.Coordinator.ReadContextAsync(evaluation.Key, root, token);
             Assert.Equal(delivery, resumed.ResumedBy);
+            var resumedEvent = resumed.ResumedBy!;
+            var resumedEvidence = evaluation.Artifacts[resumedEvent.Payload.Id];
+            var resumePrompt = string.Join("\n",
+                $"Resumed event: {resumedEvent.EventId}; selector: {resumedEvent.Selector.Source}/{resumedEvent.Selector.Kind}/{resumedEvent.Selector.SubjectId}.",
+                $"Durable payload: {resumedEvent.Payload.Id}; content hash: {resumedEvent.Payload.ContentHash}; evidence: {resumedEvidence}.",
+                "Return {\"result\":{\"kind\":\"Returned\",\"code\":\"HumanDecisionApplied\",\"text\":\"<answer containing the durable payload evidence>\"}}.");
             var second = await LiveModelProtocol.CompleteMeteredAsync(evaluation.Model, evaluation.Coordinator, resumed,
-                "resume", "You are a CrestCreates human-in-the-loop reviewer. Return strict JSON only.",
-                string.Join("\n",
-                    "The durable human event payload is APPROVED_BY_HUMAN.",
-                    "Return {\"result\":{\"kind\":\"Returned\",\"code\":\"HumanDecisionApplied\",\"text\":\"<answer containing APPROVED_BY_HUMAN>\"}}."), token);
-            var result = LiveModelProtocol.ReadResult(second.Text, root.RunId, "human-decision");
+                "resume", "You are a CrestCreates human-in-the-loop reviewer. Return strict JSON only.", resumePrompt, token);
+            var result = LiveModelProtocol.ReadResult(
+                second.Text, root.RunId, "human-decision", "HumanDecisionApplied", resumedEvidence);
             await evaluation.Coordinator.FinishAsync(evaluation.Key, root, result, token);
             var snapshot = (await evaluation.Store.FindAsync(evaluation.Key, default))!;
             Assert.Equal(delivery, Assert.Single(snapshot.Runs[root.RunId].Resumptions).Delivery);
             Assert.Equal(2, evaluation.ModelCalls.Count);
-            Assert.Contains("APPROVED_BY_HUMAN", evaluation.ModelCalls[1].Messages.Single(message => message.Role == "user").Text);
+            var secondPrompt = evaluation.ModelCalls[1].Messages.Single(message => message.Role == "user").Text;
+            Assert.Equal(resumePrompt, secondPrompt);
+            Assert.Contains(resumedEvent.EventId, secondPrompt, StringComparison.Ordinal);
+            Assert.Contains(resumedEvent.Payload.ContentHash, secondPrompt, StringComparison.Ordinal);
+            Assert.Contains(resumedEvidence, secondPrompt, StringComparison.Ordinal);
+            Assert.Equal("HumanDecisionApplied", result.Code);
             evaluation.Facts["wait"] = wait;
             evaluation.Facts["delivery"] = delivery;
             evaluation.Facts["result"] = result;
@@ -353,7 +370,7 @@ public sealed class AgentCoordinationLiveEvaluationTests
         Assert.All(evaluation.ModelCalls, call =>
         {
             Assert.Contains("NoneChatToolMode", call.ToolMode ?? string.Empty, StringComparison.Ordinal);
-            Assert.True(string.Equals(call.FinishReason, "stop", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("stop", call.FinishReason, ignoreCase: true);
             Assert.NotNull(call.Usage);
             Assert.True(call.Usage.Total is > 0);
             Assert.False(call.ObservedModel is null);

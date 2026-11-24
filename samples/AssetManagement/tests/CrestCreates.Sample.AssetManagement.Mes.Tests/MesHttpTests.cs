@@ -104,12 +104,16 @@ public sealed class MesHttpTests
             await AssertErrorAsync(mismatched, HttpStatusCode.NotFound, "evidence_not_found");
             using var failure = await PostReleaseAsync(client, path, Request(operation, failed));
             await AssertErrorAsync(failure, HttpStatusCode.Conflict, "evidence_failed");
+            Assert.Equal(passed, await SendOkAsync(client, HttpMethod.Get,
+                $"{path}/observations/{passed.ObservationId:D}/release-validation", Json.TrialObservation));
             Assert.Equal(state, await SendOkAsync(client, HttpMethod.Get, path, Json.ProductionLockState));
         }
 
         await using (var strict = await database.StartAsync("00:00:00.0000001"))
         {
             using var client = strict.Client();
+            using var staleValidation = await client.GetAsync($"{path}/observations/{passed.ObservationId:D}/release-validation");
+            await AssertErrorAsync(staleValidation, HttpStatusCode.Conflict, "evidence_outside_freshness_window");
             using var expired = await PostReleaseAsync(client, path, Request(operation, passed));
             await AssertErrorAsync(expired, HttpStatusCode.Conflict, "evidence_outside_freshness_window");
             Assert.True((await SendOkAsync(client, HttpMethod.Get, path, Json.ProductionLockState)).IsLocked);
@@ -168,6 +172,33 @@ public sealed class MesHttpTests
             await AssertErrorAsync(rejected, HttpStatusCode.NotFound, "evidence_not_found");
             Assert.True((await SendOkAsync(client, HttpMethod.Get, lockPath, Json.ProductionLockState)).IsLocked);
         }
+    }
+
+    [Fact]
+    public async Task Trial_release_and_event_consumption_require_distinct_permissions()
+    {
+        using var database = new TestDatabase();
+        await using var host = await database.StartAsync();
+        var path = LockPath(Guid.NewGuid(), "permission-boundaries");
+        using var trialOnly = host.Client("trial-only");
+        using var releaseOnly = host.Client("release-only");
+        var state = await RegisterAsync(trialOnly, path);
+        var evidence = await RecordAsync(trialOnly, path, Guid.NewGuid(), new(TrialOutcome.Passed, state.RegisteredAt));
+        using var forbiddenTrial = await releaseOnly.PutAsJsonAsync($"{path}/observations/{Guid.NewGuid()}",
+            new RecordTrialRequest(TrialOutcome.Passed, state.RegisteredAt), Json.RecordTrialRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenTrial.StatusCode);
+        using var forbiddenRelease = await PostReleaseAsync(trialOnly, path, Request(Guid.NewGuid(), evidence));
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenRelease.StatusCode);
+        using var forbiddenValidation = await trialOnly.GetAsync($"{path}/observations/{evidence.ObservationId:D}/release-validation");
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenValidation.StatusCode);
+        Assert.Equal(evidence, await SendOkAsync(releaseOnly, HttpMethod.Get,
+            $"{path}/observations/{evidence.ObservationId:D}/release-validation", Json.TrialObservation));
+        using var forbiddenFeed = await trialOnly.GetAsync(MesTrialEventFeed.Path);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenFeed.StatusCode);
+        using var forbiddenAck = await trialOnly.PutAsync($"{MesTrialEventFeed.Path}/{evidence.SourceEventId:D}/ack", null);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenAck.StatusCode);
+        Assert.True((await SendOkAsync(trialOnly, HttpMethod.Get, path, Json.ProductionLockState)).IsLocked);
+        Assert.Equal(evidence, (await ReleaseAsync(releaseOnly, path, Request(Guid.NewGuid(), evidence))).Evidence);
     }
 
     [Fact]
@@ -374,8 +405,10 @@ public sealed class MesHttpTests
                 "--Logging:LogLevel:Default=Warning",
                 $"--Mes:DatabasePath={DatabasePath}",
                 $"--Mes:EvidenceMaxAge={maxAge}",
-                "--Mes:Tenants:0:TenantId=tenant-a", "--Mes:Tenants:0:BearerToken=sample-a",
-                "--Mes:Tenants:1:TenantId=tenant-b", "--Mes:Tenants:1:BearerToken=sample-b"
+                "--Mes:Tenants:0:TenantId=tenant-a", "--Mes:Tenants:0:BearerToken=sample-a", "--Mes:Tenants:0:Permissions=mes.trial,mes.release,mes.consume",
+                "--Mes:Tenants:1:TenantId=tenant-b", "--Mes:Tenants:1:BearerToken=sample-b", "--Mes:Tenants:1:Permissions=mes.trial,mes.release,mes.consume",
+                "--Mes:Tenants:2:TenantId=tenant-a", "--Mes:Tenants:2:BearerToken=trial-only", "--Mes:Tenants:2:Permissions=mes.trial",
+                "--Mes:Tenants:3:TenantId=tenant-a", "--Mes:Tenants:3:BearerToken=release-only", "--Mes:Tenants:3:Permissions=mes.release"
             ]);
             try
             {

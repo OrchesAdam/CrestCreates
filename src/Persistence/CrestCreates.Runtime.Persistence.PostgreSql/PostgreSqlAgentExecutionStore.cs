@@ -21,7 +21,13 @@ internal sealed class PostgreSqlAgentExecutionStore(
             return null;
         }
 
-        var execution = Deserialize(reader.GetString(1), PostgreSqlRuntimeJsonSerializerContext.Default.AgentExecutionSnapshot);
+        var stored = reader.GetString(1);
+        // jsonb cannot hold U+0000 inside a JSON string. Store the opaque snapshot as a
+        // JSON string so escaped control characters remain lossless at the public boundary.
+        var payload = stored.StartsWith('"')
+            ? Deserialize(stored, PostgreSqlRuntimeJsonSerializerContext.Default.String)
+            : stored;
+        var execution = Deserialize(payload, PostgreSqlRuntimeJsonSerializerContext.Default.AgentExecutionSnapshot);
         if (execution.Key != key || execution.Revision != reader.GetInt64(0))
         {
             throw new RuntimePersistenceContractException(
@@ -80,6 +86,7 @@ internal sealed class PostgreSqlAgentExecutionStore(
     private static void AddSnapshot(NpgsqlCommand command, AgentExecutionSnapshot execution)
     {
         command.Parameters.AddWithValue("revision", execution.Revision);
-        AddJson(command, "state", Serialize(execution, PostgreSqlRuntimeJsonSerializerContext.Default.AgentExecutionSnapshot));
+        var payload = Serialize(execution, PostgreSqlRuntimeJsonSerializerContext.Default.AgentExecutionSnapshot);
+        AddJson(command, "state", Serialize(payload, PostgreSqlRuntimeJsonSerializerContext.Default.String));
     }
 }

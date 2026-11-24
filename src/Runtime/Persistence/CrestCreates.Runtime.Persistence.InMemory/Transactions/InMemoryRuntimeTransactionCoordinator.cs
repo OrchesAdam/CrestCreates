@@ -62,6 +62,7 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
             _committed.AbortReceipts.Clear();
             _committed.Outbox.Clear();
             _committed.ContinuationAcceptances.Clear();
+            _committed.ContinuationResumeClaims.Clear();
             foreach (var (key, value) in context.StagedState.Workflows) _committed.Workflows[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.HumanTasks) _committed.HumanTasks[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.Snapshots) _committed.Snapshots[key] = (value.Snapshot.Snapshot(), value.Fingerprint);
@@ -69,6 +70,7 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
             foreach (var (key, value) in context.StagedState.AbortReceipts) _committed.AbortReceipts[key] = value;
             foreach (var (key, value) in context.StagedState.Outbox) _committed.Outbox[key] = value.Clone();
             foreach (var (key, value) in context.StagedState.ContinuationAcceptances) _committed.ContinuationAcceptances[key] = value;
+            foreach (var (key, value) in context.StagedState.ContinuationResumeClaims) _committed.ContinuationResumeClaims[key] = value;
             return result;
         }
         finally

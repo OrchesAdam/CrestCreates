@@ -81,6 +81,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
             execution.Output.Should().Contain("PHASE9C_POSTGRES_OUTBOX_AOT_OK");
             execution.Output.Should().Contain("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+            execution.Output.Should().Contain("CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK");
             execution.Output.Should().Contain("CRESTCREATES_RUNTIME_OUTBOX_OK");
             execution.Output.Should().Contain("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
             execution.Output.Should().Contain("CRESTCREATES_POSTGRES_AUDIT_SINK_DUPLICATE_AFTER_RESTART_OK");
@@ -131,6 +132,23 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 controlExecution.Output.Should().NotContain(
                     "CRESTCREATES_AUDIT_RETENTION_NATIVE_OK",
                     $"retention negative control '{control}' must not emit the aggregate sentinel");
+            }
+
+            foreach (var control in new[]
+                     {
+                         "old-epoch", "cross-tenant-event", "duplicate-dispatch", "late-result",
+                         "invalid-json-identity", "invalid-json-revision", "unknown-selector"
+                     })
+            {
+                var controlExecution = await RunScenarioAsync("orchestration-negative", control);
+                controlExecution.ExitCode.Should().NotBe(0,
+                    $"orchestration negative control '{control}' must fail closed: {controlExecution.Output}");
+                controlExecution.Output.Should().Contain(
+                    $"CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CAUGHT {control}:",
+                    controlExecution.Output);
+                controlExecution.Output.Should().NotContain(
+                    "CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK",
+                    $"orchestration negative control '{control}' must not emit the aggregate sentinel");
             }
 
             Task<(int ExitCode, string Output)> RunScenarioAsync(params string[] arguments)

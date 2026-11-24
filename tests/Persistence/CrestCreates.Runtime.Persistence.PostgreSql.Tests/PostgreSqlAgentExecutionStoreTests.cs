@@ -68,9 +68,14 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
         var newOwner = root.Owner with { AgentId = "recipient", Epoch = root.Owner.Epoch + 1 };
         var offer = new AgentHandoffOffer(Guid.NewGuid(), newOwner.AgentId, ["lookup"], [artifact]);
         var handoff = new AgentHandoffRecord(offer, root.Owner, newOwner);
+        var participant = new AgentRunAssignment(Guid.NewGuid(), "coordinator", "Discuss inventory", new(10, 1), ["lookup"], [artifact]);
+        var discussion = new AgentDiscussionSnapshot(Guid.NewGuid(), newOwner.Epoch, 2, ["coordinator"], [])
+        {
+            Assignments = [participant]
+        };
         var operationId = Guid.NewGuid();
         using var arguments = JsonDocument.Parse("""{"query":"inventory"}""");
-        using var observation = JsonDocument.Parse("""{"available":true}""");
+        using var observation = JsonDocument.Parse("""{"text":"before\u0000after","available":true}""");
         var reservation = new AgentBudgetReservation(new(40, 1), new(28, 1))
         {
             ModelDecision = new(new("lookup", arguments.RootElement), null),
@@ -80,6 +85,7 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
         {
             Owner = newOwner,
             Handoffs = [handoff],
+            Discussion = discussion,
             Wait = nextWait,
             Resumptions = [resumption],
             RemainingBudget = new(60, 1),
@@ -110,6 +116,7 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
         var reloadedRoot = read.Runs[key.RootRunId];
         reloadedRoot.Owner.Should().Be(newOwner);
         reloadedRoot.Handoffs.Should().BeEquivalentTo(updatedRoot.Handoffs);
+        reloadedRoot.Discussion.Should().BeEquivalentTo(discussion);
         reloadedRoot.Wait.Should().Be(nextWait);
         reloadedRoot.Resumptions.Should().Equal(resumption);
         reloadedRoot.PendingHandoff.Should().BeNull();
@@ -120,9 +127,51 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
         reloadedReservation.ModelDecision!.Tool!.Name.Should().Be("lookup");
         reloadedReservation.ModelDecision.Tool.Arguments!.Value.GetProperty("query").GetString().Should().Be("inventory");
         reloadedReservation.ToolObservation!.Code.Should().Be("found");
+        reloadedReservation.ToolObservation.StructuredOutput!.Value.GetProperty("text").GetString()
+            .Should().Be("before\0after");
         reloadedReservation.ToolObservation.StructuredOutput!.Value.GetProperty("available").GetBoolean().Should().BeTrue();
         read.Runs[childId].ChildCall.Should().Be(child.ChildCall);
         read.Runs[childId].Result.Should().Be(child.Result);
+    }
+
+    [Fact]
+    public async Task ReActPersistsEscapedNullObservationWithoutRepeatingTool()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var provider = BuildProvider(lease.Options);
+        var store = provider.GetRequiredService<IAgentExecutionStore>();
+        var clock = TimeProvider.System;
+        var coordinator = new AgentRunCoordinator(store, clock);
+        var key = new AgentExecutionKey("tenant-a", Guid.NewGuid());
+        var owner = await coordinator.StartAsync(key, "engineer", clock.GetUtcNow().AddMinutes(1),
+            new(key.RootRunId, "discovery", "Inspect inventory", new(100, 3), ["lookup"], []));
+        var modelCalls = 0;
+        var model = new PostgreSqlReActModel(request =>
+        {
+            modelCalls++;
+            return request.Round == 1
+                ? new(12, new(new("lookup", JsonSerializer.SerializeToElement(new { Query = "inventory" })), null))
+                : new(13, new(null, new(AgentResultKind.Returned, "Found", new("report", "hash"))));
+        });
+        using var observation = JsonDocument.Parse("""{"text":"before\u0000after"}""");
+        var toolCalls = 0;
+        var tools = new PostgreSqlReActTools(_ =>
+        {
+            toolCalls++;
+            return new AgentToolObservation("Success", true, observation.RootElement.Clone());
+        });
+        var runner = new AgentReActRunner(coordinator, clock);
+
+        var result = await runner.RunAsync(key, owner, model, tools, 3, 30);
+        Assert.Equal("Found", result.Code);
+        var replay = await new AgentReActRunner(new AgentRunCoordinator(store, clock), clock)
+            .RunAsync(key, owner, model, tools, 3, 30);
+        Assert.Equal(result, replay);
+        Assert.Equal(2, modelCalls);
+        Assert.Equal(1, toolCalls);
+        var persisted = (await store.FindAsync(key, default))!.Runs[owner.RunId];
+        var receipt = Assert.Single(persisted.Reservations.Values, value => value.ToolObservation is not null);
+        Assert.Equal("before\0after", receipt.ToolObservation!.StructuredOutput!.Value.GetProperty("text").GetString());
     }
 
     [Theory]
@@ -138,7 +187,7 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
 
         var dataSource = provider.GetRequiredService<NpgsqlDataSource>();
         var mutation = corruptIdentity
-            ? "state_json = jsonb_set(state_json, '{key,tenantId}', '\"other-tenant\"'::jsonb)"
+            ? "state_json = to_jsonb(jsonb_set((state_json #>> '{}')::jsonb, '{key,tenantId}', '\"other-tenant\"'::jsonb)::text)"
             : "revision = 1";
         await using var command = dataSource.CreateCommand($"""
             update "{lease.Options.Schema}".agent_executions set {mutation} where root_run_id = @root;
@@ -148,6 +197,21 @@ public sealed class PostgreSqlAgentExecutionStoreTests(PostgreSqlRuntimeCollecti
         var read = async () => await store.FindAsync(key, default);
         (await read.Should().ThrowAsync<RuntimePersistenceContractException>()).Which.Code
             .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    private sealed class PostgreSqlReActModel(Func<AgentModelTurnRequest, AgentModelTurnResponse> respond)
+        : IAgentModelTurnExecutor
+    {
+        public ValueTask<AgentModelTurnResponse> ExecuteAsync(AgentModelTurnRequest request, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(respond(request));
+    }
+
+    private sealed class PostgreSqlReActTools(Func<AgentToolSelection, AgentToolObservation> invoke)
+        : IAgentRunToolExecutor
+    {
+        public ValueTask<AgentToolObservation> InvokeAsync(AgentRunContext context, Guid operationId,
+            AgentToolSelection selection, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(invoke(selection));
     }
 
     private static AgentExecutionSnapshot CreateExecution(AgentExecutionKey key)

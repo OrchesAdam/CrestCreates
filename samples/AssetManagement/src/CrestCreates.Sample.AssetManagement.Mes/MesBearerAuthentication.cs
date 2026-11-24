@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -8,28 +9,41 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Sample.AssetManagement.Mes;
 
+internal sealed record MesCredential(string TenantId, byte[] TokenHash, ImmutableHashSet<string> Permissions);
+
+internal static class MesPermissions
+{
+    public const string Trial = "mes.trial";
+    public const string Release = "mes.release";
+    public const string Consume = "mes.consume";
+    public static readonly ImmutableHashSet<string> All = [Trial, Release, Consume];
+}
+
 internal sealed class MesTenantCredentials
 {
-    private readonly (string TenantId, byte[] TokenHash)[] _credentials;
+    private readonly MesCredential[] _credentials;
 
     public MesTenantCredentials(IConfigurationSection tenants)
     {
-        var credentials = new List<(string TenantId, byte[] TokenHash)>();
+        var credentials = new List<MesCredential>();
         foreach (var tenant in tenants.GetChildren())
         {
             var tenantId = tenant["TenantId"];
             var token = tenant["BearerToken"];
+            var permissions = tenant["Permissions"]?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
             if (string.IsNullOrWhiteSpace(tenantId) || tenantId != tenantId.Trim()
-                || string.IsNullOrEmpty(token) || !token.All(IsBearerCharacter))
+                || string.IsNullOrEmpty(token) || !token.All(IsBearerCharacter)
+                || permissions.Length == 0 || permissions.Any(permission => !MesPermissions.All.Contains(permission))
+                || permissions.Distinct(StringComparer.Ordinal).Count() != permissions.Length)
             {
-                throw new InvalidOperationException("Each Mes:Tenants entry requires a TenantId and a valid BearerToken.");
+                throw new InvalidOperationException("Each Mes:Tenants entry requires a TenantId, a valid BearerToken, and distinct supported Permissions.");
             }
 
             var tokenHash = Hash(token);
             if (credentials.Exists(credential => CryptographicOperations.FixedTimeEquals(credential.TokenHash, tokenHash)))
                 throw new InvalidOperationException("Mes:Tenants bearer credentials must be unique.");
 
-            credentials.Add((tenantId, tokenHash));
+            credentials.Add(new MesCredential(tenantId, tokenHash, [.. permissions]));
         }
 
         if (credentials.Count == 0)
@@ -38,17 +52,17 @@ internal sealed class MesTenantCredentials
         _credentials = credentials.ToArray();
     }
 
-    public string? FindTenant(string token)
+    public MesCredential? FindCredential(string token)
     {
         var hash = Hash(token);
-        string? tenantId = null;
-        foreach (var credential in _credentials)
+        MesCredential? credential = null;
+        foreach (var candidate in _credentials)
         {
-            if (CryptographicOperations.FixedTimeEquals(credential.TokenHash, hash))
-                tenantId = credential.TenantId;
+            if (CryptographicOperations.FixedTimeEquals(candidate.TokenHash, hash))
+                credential = candidate;
         }
 
-        return tenantId;
+        return credential;
     }
 
     private static byte[] Hash(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
@@ -65,6 +79,7 @@ internal sealed class MesBearerAuthentication(
 {
     public const string SchemeName = "Bearer";
     public const string TenantClaim = "tenantid";
+    public const string PermissionClaim = "mes.permission";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -74,12 +89,13 @@ internal sealed class MesBearerAuthentication(
 
         if (header.Count != 1 || !AuthenticationHeaderValue.TryParse(header[0], out var authorization)
             || !string.Equals(authorization.Scheme, SchemeName, StringComparison.OrdinalIgnoreCase)
-            || authorization.Parameter is not { } token || credentials.FindTenant(token) is not { } tenantId)
+            || authorization.Parameter is not { } token || credentials.FindCredential(token) is not { } credential)
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid MES bearer credential."));
         }
 
-        var identity = new ClaimsIdentity([new Claim(TenantClaim, tenantId)], SchemeName);
+        Claim[] claims = [new(TenantClaim, credential.TenantId), .. credential.Permissions.Select(permission => new Claim(PermissionClaim, permission))];
+        var identity = new ClaimsIdentity(claims, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 

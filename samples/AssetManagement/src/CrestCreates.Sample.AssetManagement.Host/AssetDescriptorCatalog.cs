@@ -23,6 +23,7 @@ public static class AssetDescriptorCatalog
     private const string List = "asset-management.schema.asset-list";
     private const string Operation = "asset-management.schema.operation";
     private const string Decision = "asset-management.schema.maintenance-decision";
+    private const string TaskCompletion = "asset-management.schema.maintenance-task-completion";
 
     public static IReadOnlyList<SchemaDescriptor> Schemas { get; } =
     [
@@ -36,7 +37,8 @@ public static class AssetDescriptorCatalog
         Schema(Asset, new SchemaFieldDescriptor { Name = "id", FieldType = "guid", IsRequired = true }, String("tenantId", 1, 100), new SchemaFieldDescriptor { Name = "organizationId", FieldType = "guid", IsNullable = true }, String("assetTag", 1, 100), String("name", 1, 200), String("description", 1, 2000), String("category", 1, 100), String("location", 1, 500, nullable: true), String("status", 1, 40), String("assignedUserId", 1, 200, nullable: true), new SchemaFieldDescriptor { Name = "activeAssignmentId", FieldType = "guid", IsNullable = true }, String("maintenanceWorkflowInstanceId", 1, 200, nullable: true), String("concurrencyStamp", 1, 200)),
         Schema(List, new SchemaFieldDescriptor { Name = "items", FieldType = "array", IsRequired = true, IsCollection = true, CollectionElementType = "AssetResult" }),
         Schema(Operation, new SchemaFieldDescriptor { Name = "assetId", FieldType = "guid", IsRequired = true }, String("status", 1, 40), String("workflowInstanceId", 1, 200, nullable: true), String("humanTaskId", 1, 200, nullable: true)),
-        Schema(Decision, RequiredGuid("assetId"), new SchemaFieldDescriptor { Name = "approved", FieldType = "bool", IsRequired = true }, String("note", 1, 1000))
+        Schema(Decision, RequiredGuid("assetId"), new SchemaFieldDescriptor { Name = "approved", FieldType = "bool", IsRequired = true }, String("note", 1, 1000)),
+        Schema(TaskCompletion, RequiredGuid("assetId"), String("humanTaskId", 1, 200), String("outcome", 1, 20), String("note", 1, 1000))
     ];
 
     public static IReadOnlyList<CapabilityDescriptor> Capabilities { get; } =
@@ -49,7 +51,8 @@ public static class AssetDescriptorCatalog
         Capability(AssetContractIds.ReturnCapability, "return", CapabilityKind.Command, CapabilityRiskLevel.Medium, ReturnInput, Asset, AssetPermissions.Assets.Return),
         Capability(AssetContractIds.TransferCapability, "transfer", CapabilityKind.Command, CapabilityRiskLevel.High, TransferInput, Asset, AssetPermissions.Assets.Transfer),
         Capability(AssetContractIds.RequestMaintenanceCapability, "request-maintenance", CapabilityKind.Command, CapabilityRiskLevel.High, MaintenanceInput, Operation, AssetPermissions.Assets.RequestMaintenance),
-        Capability(AssetContractIds.ApplyMaintenanceCapability, "apply-maintenance", CapabilityKind.Command, CapabilityRiskLevel.High, Decision, Asset, AssetPermissions.Assets.CompleteMaintenance)
+        Capability(AssetContractIds.ApplyMaintenanceCapability, "apply-maintenance", CapabilityKind.Command, CapabilityRiskLevel.High, Decision, Asset, AssetPermissions.Assets.CompleteMaintenance),
+        Capability(AssetContractIds.CompleteMaintenanceTaskCapability, "complete-maintenance-task", CapabilityKind.Command, CapabilityRiskLevel.High, TaskCompletion, Operation, AssetPermissions.Assets.CompleteMaintenance)
     ];
 
     public static FormDescriptor MaintenanceForm { get; } = new()

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 
 namespace CrestCreates.Agent.Orchestration;
 
@@ -144,15 +145,20 @@ public sealed partial class AgentRunCoordinator(IAgentExecutionStore store, Time
         CancellationToken cancellationToken = default) =>
         SettleAsync(key, owner, operationId, used, null, null, cancellationToken);
 
-    internal ValueTask<bool> RecordModelDecisionAsync(
-        AgentExecutionKey key, AgentRunOwner owner, Guid operationId, long used, AgentModelDecision decision,
-        CancellationToken cancellationToken) =>
-        SettleAsync(key, owner, operationId, new(used, 0), decision, null, cancellationToken);
-
-    internal ValueTask<bool> RecordToolObservationAsync(
-        AgentExecutionKey key, AgentRunOwner owner, Guid operationId, AgentToolObservation observation,
-        CancellationToken cancellationToken) =>
-        SettleAsync(key, owner, operationId, new(0, 1), null, observation, cancellationToken);
+    public ValueTask<bool> ReconcileAsync(
+        AgentExecutionKey key, AgentRunOwner owner, Guid operationId, AgentOperationReconciliation reconciliation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reconciliation);
+        return reconciliation switch
+        {
+            AgentModelTurnReconciliation model when model.Decision is not null =>
+                SettleAsync(key, owner, operationId, new(model.UsedTokens, 0), model.Decision, null, cancellationToken),
+            AgentToolObservationReconciliation tool when tool.Observation is not null =>
+                SettleAsync(key, owner, operationId, new(0, 1), null, tool.Observation, cancellationToken),
+            _ => throw new ArgumentException("The operation reconciliation requires a supported payload.", nameof(reconciliation))
+        };
+    }
 
     public async ValueTask<AgentRunSnapshot> ReadRunAsync(
         AgentExecutionKey key, AgentRunOwner owner, CancellationToken cancellationToken = default)
@@ -193,14 +199,39 @@ public sealed partial class AgentRunCoordinator(IAgentExecutionStore store, Time
                 throw new InvalidOperationException("No budget was reserved for this operation in the current epoch.");
             }
 
+            if (modelDecision is not null)
+            {
+                if (reservation.Reserved.ToolCalls != 0 || used.ToolCalls != 0)
+                {
+                    throw new InvalidOperationException("The reservation is not bound to a model turn.");
+                }
+
+                modelDecision = ValidateModelDecision(run, modelDecision);
+            }
+            else if (observation is not null)
+            {
+                if (reservation.Reserved.ModelTokens != 0 || used != new AgentBudget(0, 1))
+                {
+                    throw new InvalidOperationException("The reservation is not bound to a tool invocation.");
+                }
+
+                observation = ValidateToolObservation(observation);
+            }
+
             if (reservation.Used is { } prior)
             {
-                if (prior != used || modelDecision is not null || observation is not null)
+                if (prior != used || ((modelDecision is not null || observation is not null) &&
+                    !SameReceipt(reservation, used, modelDecision, observation)))
                 {
                     throw new InvalidOperationException("The operation already has a usage receipt.");
                 }
 
                 return (execution.Runs, false);
+            }
+
+            if (reservation.ModelDecision is not null || reservation.ToolObservation is not null)
+            {
+                throw new InvalidOperationException("The operation has an incomplete receipt and requires investigation.");
             }
 
             if (run.Result is not null)
@@ -217,6 +248,74 @@ public sealed partial class AgentRunCoordinator(IAgentExecutionStore store, Time
                 })
             }), true);
         }, cancellationToken);
+
+    private static AgentModelDecision ValidateModelDecision(AgentRunSnapshot run, AgentModelDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        if (decision.Tool is null)
+        {
+            if (decision.Result is not { Kind: AgentResultKind.Returned or AgentResultKind.Failed } result)
+            {
+                throw new ArgumentException("A model reconciliation requires a terminal result or one tool selection.", nameof(decision));
+            }
+
+            ValidateResult(result);
+            return decision;
+        }
+
+        if (decision.Result is not null || string.IsNullOrWhiteSpace(decision.Tool.Name) ||
+            decision.Tool.Arguments is { ValueKind: not JsonValueKind.Object } ||
+            !run.Tools.Contains(decision.Tool.Name, StringComparer.Ordinal))
+        {
+            throw new ArgumentException("The model reconciliation contains an invalid or ungranted tool selection.", nameof(decision));
+        }
+
+        return decision with { Tool = decision.Tool with { Arguments = decision.Tool.Arguments?.Clone() } };
+    }
+
+    private static AgentToolObservation ValidateToolObservation(AgentToolObservation observation)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(observation.Code);
+        return observation with { StructuredOutput = observation.StructuredOutput?.Clone() };
+    }
+
+    private static void ValidateResult(AgentRunResult result)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(result.Code);
+        if (result.Output is { } output)
+        {
+            ValidateArtifact(output);
+        }
+    }
+
+    private static bool SameReceipt(AgentBudgetReservation reservation, AgentBudget used,
+        AgentModelDecision? decision, AgentToolObservation? observation) =>
+        reservation.Used == used && SameDecision(reservation.ModelDecision, decision) &&
+        SameObservation(reservation.ToolObservation, observation);
+
+    private static bool SameDecision(AgentModelDecision? left, AgentModelDecision? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        return left.Result == right.Result &&
+            ((left.Tool is null && right.Tool is null) ||
+             (left.Tool is not null && right.Tool is not null && left.Tool.Name == right.Tool.Name &&
+              SameJson(left.Tool.Arguments, right.Tool.Arguments)));
+    }
+
+    private static bool SameObservation(AgentToolObservation? left, AgentToolObservation? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : left.Code == right.Code && left.Succeeded == right.Succeeded &&
+              SameJson(left.StructuredOutput, right.StructuredOutput);
+
+    private static bool SameJson(JsonElement? left, JsonElement? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : JsonElement.DeepEquals(left.Value, right.Value);
 
     public ValueTask<AgentHandoffRecord> OfferHandoffAsync(
         AgentExecutionKey key, AgentRunOwner owner, AgentHandoffOffer offer,

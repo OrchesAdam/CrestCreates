@@ -168,22 +168,24 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         var lockState = await _mes.GetLockAsync(observation.TenantId, observation.EquipmentId, workflow.InstanceId, ct);
         if (lockState.Release is not null || lockFact.AssetId != observation.EquipmentId ||
             lockFact.RegisteredAt != lockState.RegisteredAt || observation.ObservedAt < lockFact.RegisteredAt ||
-            observation.ObservedAt > DateTimeOffset.UtcNow || observation.Outcome != TrialOutcome.Passed)
+            observation.ObservedAt > DateTimeOffset.UtcNow || observation.Outcome is not (TrialOutcome.Passed or TrialOutcome.Failed))
         {
             return true;
         }
 
+        var approved = observation.Outcome == TrialOutcome.Passed;
         await _humanTasks.CompleteAsync(new HumanTaskCompletionRequest
         {
             HumanTaskKey = task.Key,
-            Outcome = "Approve",
+            Outcome = approved ? "Approve" : "Reject",
             ActorId = AssetProductionDescriptors.MesEvidenceActor,
             ActorRoles = [AssetProductionDescriptors.MesEvidenceRole],
             Result = _stateRegistry.Capture(new AssetMaintenanceEvidenceFact
             {
                 AssetId = observation.EquipmentId, RequesterId = ReadRequester(RestoreVariables(task.Input)),
-                ActorId = AssetProductionDescriptors.MesEvidenceActor, Approved = true,
-                Note = "MES trial evidence verified", Observation = observation
+                ActorId = AssetProductionDescriptors.MesEvidenceActor, Approved = approved,
+                Note = approved ? "MES trial evidence verified" : "MES trial failed; rework and retest required",
+                Observation = observation
             })
         }, ct);
         return true;
@@ -199,14 +201,17 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             ct);
     }
 
-    public async Task CompleteAsync(string humanTaskId, string outcome, string note, CancellationToken ct = default)
+    public Task CompleteAsync(string humanTaskId, string outcome, string note, CancellationToken ct = default) =>
+        CompleteAsync(null, humanTaskId, outcome, note, ct);
+
+    public async Task CompleteAsync(Guid? expectedAssetId, string humanTaskId, string outcome, string note, CancellationToken ct = default)
     {
         var tenantId = RequireTenant();
         var task = await _taskStore.GetAsync(new RuntimeInstanceKey(tenantId, humanTaskId), ct)
-            ?? throw new InvalidOperationException("Maintenance HumanTask is unavailable.");
+            ?? throw new CapabilityFailureException("CAPABILITY_RESOURCE_NOT_FOUND", "Maintenance HumanTask is unavailable.");
         if (task.TenantId != tenantId)
         {
-            throw new UnauthorizedAccessException("The HumanTask belongs to another tenant.");
+            throw new CapabilityFailureException("CAPABILITY_RESOURCE_NOT_FOUND", "Maintenance HumanTask is unavailable.");
         }
 
         var taskRole = ResolveRole(task);
@@ -219,12 +224,16 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
 
         var values = RestoreVariables(task.Input);
         var assetId = ReadAssetId(values);
+        if (expectedAssetId is { } requestedAssetId && assetId != requestedAssetId)
+            throw new CapabilityFailureException("ASSET_MAINTENANCE_TASK_MISMATCH", "The maintenance task belongs to another asset.");
         var requesterId = ReadRequester(values);
         var workflow = task.WorkflowKey is { } workflowKey
             ? await _workflowStore.GetAsync(workflowKey, ct)
             : null;
         if (workflow is null)
-            throw new InvalidOperationException("The maintenance workflow is unavailable.");
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "The maintenance workflow is unavailable.");
         var critical = workflow.WorkflowPin.Ref.Version == AssetProductionDescriptors.WorkflowVersion;
         if (critical && (!IsCriticalWorkflowForAsset(workflow, assetId) || ReadLock(workflow).AssetId != assetId))
         {
@@ -233,13 +242,13 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
 
         if (taskRole == AssetMaintenanceTaskRole.TrialEvidence)
         {
-            throw new UnauthorizedAccessException("MES evidence requires the typed trial verification entry point.");
+            throw new CapabilityFailureException("CAPABILITY_FORBIDDEN", "MES evidence requires the typed trial verification entry point.");
         }
 
         var requiredRole = taskRole == AssetMaintenanceTaskRole.Quality ? AssetProductionDescriptors.QualityRole : "asset-manager";
         if (!_currentUser.IsInRole(requiredRole))
         {
-            throw new UnauthorizedAccessException($"The {requiredRole} role is required to complete this maintenance review.");
+            throw new CapabilityFailureException("CAPABILITY_FORBIDDEN", $"The {requiredRole} role is required to complete this maintenance review.");
         }
 
         AssetMaintenanceEvidenceFact? trial = null;
@@ -249,7 +258,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             if (initial?.Output is null || _stateRegistry.Restore(initial.Output) is not AssetMaintenanceEvidenceFact decision ||
                 !decision.Approved || decision.ActorId == _currentUser.Id)
             {
-                throw new UnauthorizedAccessException("Quality sign-off requires a different approver from the maintenance supervisor.");
+                throw new CapabilityFailureException("CAPABILITY_FORBIDDEN", "Quality sign-off requires a different approver from the maintenance supervisor.");
             }
 
             var evidenceStep = workflow.StepResults.LastOrDefault(result => result.StepId == AssetProductionDescriptors.TrialStepId && result.HumanTaskOutcome is not null);
@@ -259,6 +268,24 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
                 trial.Observation.TenantId != tenantId)
             {
                 throw new CapabilityFailureException("ASSET_MES_EVIDENCE_MISSING", "Quality sign-off requires persisted MES trial evidence.");
+            }
+
+            if (approved)
+            {
+                TrialObservation validated;
+                try
+                {
+                    validated = await _mes.ValidateReleaseEvidenceAsync(tenantId, assetId, workflow.InstanceId,
+                        trial.Observation.ObservationId, ct);
+                }
+                catch (CapabilityFailureException exception) when (exception.ErrorCode == "ASSET_MES_EVIDENCE_REJECTED")
+                {
+                    throw new CapabilityFailureException("ASSET_MES_EVIDENCE_NOT_RELEASABLE",
+                        "The MES evidence is no longer releasable; reject this review and start a rework/retest workflow.");
+                }
+
+                if (validated != trial.Observation)
+                    throw new CapabilityFailureException("ASSET_MES_EVIDENCE_MISMATCH", "MES release validation did not match the persisted trial evidence.");
             }
         }
 
@@ -505,12 +532,18 @@ public sealed partial class AssetMaintenanceDecisionConsumer : CrestCreates.Runt
         var isInitial = role == AssetMaintenanceTaskRole.Initial;
         if (critical && role == AssetMaintenanceTaskRole.TrialEvidence)
         {
-            if (!fact.Approved || _stateRegistry.Restore(payload.Result) is not AssetMaintenanceEvidenceFact
+            if (_stateRegistry.Restore(payload.Result) is not AssetMaintenanceEvidenceFact
                 {
-                    Observation.Outcome: TrialOutcome.Passed
-                })
-                return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Conflict("ASSET_MAINTENANCE_FACT_INVALID", "MES evidence completion requires a persisted passing observation.");
-            return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Accepted();
+                    Observation.TenantId: var observationTenant,
+                    Observation.WorkOrderId: var workOrderId,
+                    Observation.Outcome: var observationOutcome
+                } evidence || evidence.Observation is null ||
+                observationTenant != task.TenantId || workOrderId != task.WorkflowInstanceId ||
+                fact.Approved != (observationOutcome == TrialOutcome.Passed))
+                return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Conflict("ASSET_MAINTENANCE_FACT_INVALID", "MES evidence completion requires a persisted observation bound to this maintenance task.");
+            if (fact.Approved)
+                return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Accepted();
+            _logger.LogInformation("MES trial failed for {AssetId}; releasing the maintenance decision for rework.", fact.AssetId);
         }
 
         if (isInitial && fact.Approved)
