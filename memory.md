@@ -1,13 +1,17 @@
 # CrestCreates platform status — 2026-11-24
 
-## 2026-11-24 — PR #194 审查修复（本地修复，未提交/推送/合并）
+## 2026-11-24 — PR #194 审查修复（已提交/推送，本地 CI 全绿，未合并）
 
 - **治理入口**：`AssetProductionEvolutionOperator` 拆为 `ProposeAsync` 与 `ApproveAsync`；提案只创建待审 activation request，CLI 必须输入精确 `APPROVE <approver>` 才以独立人类身份完成 HumanTask，拒绝自审批。该入口仍是本地确定性样例（DevelopmentDefaults + InMemory Control Plane stubs），不宣称生产认证或 durable activation。
 - **Workflow 可靠恢复**：acceptance 的 `RunOperationId` 固定复用持久化 `CompletionEventId`；新增 V019 `runtime_workflow_continuation_resume_claims`，以 outbox lease/fence 做原子恢复 claim，绑定精确 `WorkflowToRevision`。活跃 claim 阻止并发重放，失败/取消释放并让 Outbox 返回 Retry，成功保留完成标记；旧 acceptance 在后续 revision 上不再恢复。初始执行与重放共用同一 claim 路径，不再吞掉 post-resume 异常。独立复审后又修正 PostgreSQL「先锁 workflow、再读 claim」的首次插入竞态，以及 InMemory claim 深拷贝/ambient 回滚语义，并补两会话竞态与回滚回归。InMemory 与 PostgreSQL 主链同契约。
 - **其余审查修复**：Plan 保护所有已启动步骤（不只前缀）；legacy discussion 仅允许空集合幂等重开；DynamicApi fallback 按 transport-neutral failure facts 映射 400/401/403/404/409/428/499/504；Asset 完成走正式 CapabilityEndpoint，校验租户/资产/task 关联，未知或跨租户 task 返回 404，完成后回读权威资产状态。
 - **串行证据（~/.dotnet 10.0.114 + 一次性 PG16）**：Workflow **124/124**；PostgreSQL 新增 claim 聚焦 **3/3**（含两会话首次插入竞态）；Agent.Orchestration **30/30**；DynamicApi **172/172**；Asset 治理/审批聚焦 **5/5**；Asset E2E **148/148 + 2 live opt-in skip**；PostgreSQL 全量首轮 **495/496**，唯一失败为未同步 V019 表清单，修正后该迁移用例 **1/1** 复跑通过（覆盖合计 496）；PostgreSQL NativeAOT fixture **1/1**（真实 publish/link/run，最终竞态修正后 1m59s），新增 `CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK`，断言稳定 operation identity 与完成后拒绝重放。
 - **最终构建**：`CrestCreates.slnx` 全方案 `dotnet build --no-restore -m:1 -p:UseSharedCompilation=false` **0 error / 11 个既有依赖 trimming warning**，本轮修复文件无新增 warning。
-- **边界**：原生新增断言覆盖 PostgreSQL + linux-x64 的正式 continuation 完成/拒绝重放路径；跨 provider 原子 claim、失败释放、旧 revision 拒绝由 JIT PostgreSQL 回归证明。lease 到期后的崩溃恢复不承诺分布式 exactly-once，真实认证/权限/租户、其他 ORM/RID 与生产治理 activation 不外推。本轮未提交、未推送、未合并。
+- **提交状态**：审查修复已提交为 `0c88e62e945daf06306c39763d118e310705a03f`（`fix: harden agent orchestration and workflow recovery`），本地 CI 回归修复为 `d364b68e0cbad25071cbca296f603923708cf256`（`fix: sanitize capability failures and stabilize registration`），均随 PR #194 分支 `feat/agent-modes-business-evolution` 推送；未合并。
+- **本地 CI JIT（.NET 10.0.114）**：结构化失败映射未知分支改为脱敏可序列化 ProblemDetails，无 facts fallback 不再输出原始消息；静态 result-contract 注册改为 lock + 快照并补确定性 Reset 竞态回归；CodeGenerator camelCase 基线断言兼容后续 STJ 选项。串行结果：DynamicApi **176/176**、GeneratedCrud JIT **25/25**、CodeGenerator 首轮 **475/476**（唯一断言修复后聚焦 **1/1**，合计覆盖 476）、Workflow **124/124**、PostgreSQL **497/497**、PostgreSQL AotFixture **1/1**、Integration **103/103**（含 Health 故障注入）、CAP **38/38**、Boundary **283/283 + 证据门禁 14/14**、Phase9c **2/2**、Asset E2E **148/148 + 2 live opt-in skip**。
+- **本地 NativeAOT（实现提交 `d364b68e`）**：按 `ci.yml` 串行完成 12 个 publish/link/run 门禁，共 **39/39**：CapabilityEndpoint **10/10**、Core **2/2**、GeneratedCrud **3/3**、Ticket **5/5**、MCP **1/1**、Agent.Tools **1/1**、UnitOfWork **1/1**、LocalEvent **1/1**、RabbitMQ trim + NativeAOT **2/2**、Memory.Tools **1/1**、Mcp.Memory **1/1**、ControlPlane JsonContracts **11/11**；GeneratedCrud 的 15 场景与两类负控、RabbitMQ 双模式均真实执行。
+- **本地 CI 环境边界**：共享 `crest-test-*` 容器/卷未启停；普通验证使用默认 Podman 命名空间中的一次性 PG/Rabbit，CAP/Health 使用独立 root/runroot 命名空间中的一次性同名 Compose 服务。发现 `ci.yml` 的 CAP `--no-build` 步骤依赖根 `CrestCreates.slnx`，但该项目此前仅在 `solutions/CrestCreates.All.slnx`；已补入根解决方案，根 restore/build **0 error** 后 CAP `--no-build --list-tests` 入口成功，完整 CAP 套件 **38/38**。未修改 CI 工作流。
+- **边界**：原生新增断言覆盖 PostgreSQL + linux-x64 的正式 continuation 完成/拒绝重放路径；跨 provider 原子 claim、失败释放、旧 revision 拒绝由 JIT PostgreSQL 回归证明。lease 到期后的崩溃恢复不承诺分布式 exactly-once，真实认证/权限/租户、其他 ORM/RID 与生产治理 activation 不外推。
 
 ## 2026-11-24 — 八模式 PostgreSQL NativeAOT 场景、重启负控与 crash-window 恢复
 
