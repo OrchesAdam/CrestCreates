@@ -138,12 +138,14 @@ public class GeneratedCrudHttpTests : IClassFixture<GeneratedCrudFixtureFactory>
             "/api/widgets/search",
             JsonContent("""{"pageIndex":0,"pageSize":10,"filters":[{"field":"NoSuchField","operator":2,"value":"x"}]}"""));
 
-        // Assert — the failure body exists and carries the plan rejection (an empty 500 fails to parse).
+        // Assert — the failure body exists and carries only bounded internal-error facts.
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
             "an unhandled plan rejection surfaces through the pipeline's failure mapping");
         using var body = await ReadDocumentAsync(response);
-        body.RootElement.GetProperty("detail").GetString().Should().Contain("NoSuchField",
-            "the failure body must carry the rejection the generated typed adapter raised");
+        body.RootElement.GetProperty("detail").GetString().Should().Be("服务器内部错误。");
+        body.RootElement.GetProperty("errorCode").GetString().Should().Be("Crest.InternalError");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("NoSuchField",
+            "an unclassified internal rejection must not expose its raw exception message");
     }
 
     [Fact]

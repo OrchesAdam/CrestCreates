@@ -159,8 +159,9 @@ public class CrudJsonContractMsBuildBaselineTests
 
         jsonContractsSource.Should().Contain("CrestCreatesCrudJsonSerializerContext",
             "the CRUD roots must be registered on one generated context");
+        // Other source-generation options may follow the naming policy.
         jsonContractsSource.Should().Contain(
-            "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)",
+            "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase",
             "HTTP CRUD uses the camelCase policy of §7.1");
 
         // #128 S4: the *whole compilation* must stay free of the legacy Dynamic API surface for a

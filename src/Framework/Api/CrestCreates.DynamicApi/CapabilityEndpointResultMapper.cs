@@ -107,7 +107,11 @@ internal static class CapabilityEndpointResultMapper
             CapabilityFailureKind.PreconditionRequired => Results.StatusCode(StatusCodes.Status428PreconditionRequired),
             CapabilityFailureKind.Cancelled => Results.StatusCode(StatusCodes.Status499ClientClosedRequest),
             CapabilityFailureKind.ManagedDeadline => Results.StatusCode(StatusCodes.Status504GatewayTimeout),
-            _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+            _ => Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                detail: facts.SafeMessage, extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = facts.ErrorCode
+                })
         };
 
     private static IResult MapFailureCode(CapabilityExecutionResult result)
@@ -125,7 +129,11 @@ internal static class CapabilityEndpointResultMapper
                 Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
              "CAPABILITY_VALIDATION_FAILED" => Results.Problem(statusCode: 400, detail: result.ErrorMessage),
             "RATE_LIMIT_EXCEEDED" => Results.StatusCode(429),
-            _ => Results.Problem(detail: result.ErrorMessage)
+            _ => Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                detail: "服务器内部错误。", extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = result.ErrorCode
+                })
         };
     }
 }

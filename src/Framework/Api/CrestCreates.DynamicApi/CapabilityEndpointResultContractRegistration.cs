@@ -12,6 +12,7 @@ namespace CrestCreates.DynamicApi;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class CapabilityEndpointResultContractRegistration
 {
+    private static readonly object _sync = new();
     private static readonly List<(string EndpointId, int Version, Func<EndpointExecutionContext, IServiceProvider, object> Mapper)> _pending = new();
 
     /// <summary>
@@ -20,7 +21,8 @@ public static class CapabilityEndpointResultContractRegistration
     /// </summary>
     public static void Register(string endpointId, int version, Func<EndpointExecutionContext, IServiceProvider, object> mapResult)
     {
-        _pending.Add((endpointId, version, mapResult));
+        lock (_sync)
+            _pending.Add((endpointId, version, mapResult));
     }
 
     /// <summary>
@@ -29,7 +31,11 @@ public static class CapabilityEndpointResultContractRegistration
     /// </summary>
     internal static void ApplyTo(ICapabilityEndpointResultContractRegistry registry)
     {
-        foreach (var (endpointId, version, mapper) in _pending)
+        (string EndpointId, int Version, Func<EndpointExecutionContext, IServiceProvider, object> Mapper)[] pending;
+        lock (_sync)
+            pending = _pending.ToArray();
+
+        foreach (var (endpointId, version, mapper) in pending)
             registry.Register(endpointId, version, mapper);
     }
 
@@ -39,6 +45,7 @@ public static class CapabilityEndpointResultContractRegistration
     /// </summary>
     internal static void Reset()
     {
-        _pending.Clear();
+        lock (_sync)
+            _pending.Clear();
     }
 }

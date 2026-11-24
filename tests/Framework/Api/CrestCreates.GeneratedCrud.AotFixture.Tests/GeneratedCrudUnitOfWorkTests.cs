@@ -81,8 +81,11 @@ public class GeneratedCrudUnitOfWorkTests : IClassFixture<GeneratedCrudFixtureFa
 
         // Assert — the failure surfaces as the serializable problem body...
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        body.RootElement.GetProperty("detail").GetString().Should().Contain("rollback probe");
+        var rawBody = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(rawBody);
+        body.RootElement.GetProperty("detail").GetString().Should().Be("服务器内部错误。");
+        body.RootElement.GetProperty("errorCode").GetString().Should().Be("Crest.InternalError");
+        rawBody.Should().NotContain("rollback probe");
 
         // ...and the unit of work rolled back instead of committing.
         var after = _observer.Capture();
@@ -158,8 +161,11 @@ public class GeneratedCrudUnitOfWorkTests : IClassFixture<GeneratedCrudFixtureFa
 
         // Assert — the repository's optimistic-concurrency contract is what failed...
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        body.RootElement.GetProperty("detail").GetString().Should().Contain("Concurrency conflict");
+        var rawBody = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(rawBody);
+        body.RootElement.GetProperty("detail").GetString().Should().Be("服务器内部错误。");
+        body.RootElement.GetProperty("errorCode").GetString().Should().Be("Crest.InternalError");
+        rawBody.Should().NotContain("Concurrency conflict");
 
         // ...the window rolled back without committing...
         var after = _observer.Capture();

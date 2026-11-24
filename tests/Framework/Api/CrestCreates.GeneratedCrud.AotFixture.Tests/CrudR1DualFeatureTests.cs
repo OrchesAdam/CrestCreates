@@ -84,14 +84,18 @@ public class CrudR1DualFeatureTests
             var widgetFailure = await SendAsync(client, HttpMethod.Post, "/api/widgets/search",
                 """{"pageIndex":0,"pageSize":5,"filters":[{"field":"NoSuchField","operator":2,"value":"x"}]}""");
             widgetFailure.Status.Should().Be(500);
-            JsonDocument.Parse(widgetFailure.Body).RootElement.GetProperty("detail").GetString()
-                .Should().Contain("NoSuchField");
+            using var widgetFailureBody = JsonDocument.Parse(widgetFailure.Body);
+            widgetFailureBody.RootElement.GetProperty("detail").GetString().Should().Be("服务器内部错误。");
+            widgetFailureBody.RootElement.GetProperty("errorCode").GetString().Should().Be("Crest.InternalError");
+            widgetFailure.Body.Should().NotContain("NoSuchField");
 
             var gadgetFailure = await SendAsync(client, HttpMethod.Post, "/api/gadgets/search",
                 """{"pageIndex":0,"pageSize":5,"filters":[{"field":"NoSuchField","operator":2,"value":"x"}]}""");
             gadgetFailure.Status.Should().Be(500);
-            JsonDocument.Parse(gadgetFailure.Body).RootElement.GetProperty("detail").GetString()
-                .Should().Contain("NoSuchField");
+            using var gadgetFailureBody = JsonDocument.Parse(gadgetFailure.Body);
+            gadgetFailureBody.RootElement.GetProperty("detail").GetString().Should().Be("服务器内部错误。");
+            gadgetFailureBody.RootElement.GetProperty("errorCode").GetString().Should().Be("Crest.InternalError");
+            gadgetFailure.Body.Should().NotContain("NoSuchField");
         }
         finally
         {

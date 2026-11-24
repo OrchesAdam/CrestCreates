@@ -185,6 +185,42 @@ public class CapabilityEndpointResultMapperTests
     }
 
     [Fact]
+    public void Map_UnknownFailureWithoutFacts_DoesNotExposeRawMessage()
+    {
+        var result = CapabilityExecutionResult.Failure(
+            "HANDLER_NOT_FOUND",
+            "raw internal capability detail",
+            TimeSpan.Zero);
+
+        var httpResult = CapabilityEndpointResultMapper.Map(result, new CapabilityEndpointOutputMapping());
+
+        var problem = httpResult.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Which.ProblemDetails;
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Detail.Should().Be("服务器内部错误。");
+        problem.Extensions["errorCode"].Should().Be("HANDLER_NOT_FOUND");
+    }
+
+    [Theory]
+    [InlineData(CapabilityFailureKind.Unknown)]
+    [InlineData(CapabilityFailureKind.NonCaller)]
+    public void Map_InternalFailureFacts_ReturnsSanitizedProblemDetails(CapabilityFailureKind kind)
+    {
+        var result = CapabilityExecutionResult.Failure(
+            "PIPELINE_ERROR",
+            "raw persistence detail",
+            TimeSpan.Zero,
+            failureFacts: new CapabilityFailureFacts(kind, "Crest.InternalError", "服务器内部错误。"));
+
+        var httpResult = CapabilityEndpointResultMapper.Map(
+            result, new CapabilityEndpointOutputMapping(), new DefaultHttpContext());
+
+        var problem = httpResult.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Which.ProblemDetails;
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Detail.Should().Be("服务器内部错误。");
+        problem.Extensions["errorCode"].Should().Be("Crest.InternalError");
+    }
+
+    [Fact]
     public void Map_CancelledExecution_Returns499()
     {
         var result = CapabilityExecutionResult.Cancelled(TimeSpan.Zero);

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -95,6 +97,32 @@ public sealed class CapabilityEndpointBindingRegistryTests : IDisposable
     }
 
     [Fact]
+    public void ResultContractApplyTo_UsesSnapshotWhenPendingRegistrationsAreReset()
+    {
+        CapabilityEndpointResultContractRegistration.Reset();
+        try
+        {
+            CapabilityEndpointResultContractRegistration.Register("first", 1, (_, _) => new object());
+            CapabilityEndpointResultContractRegistration.Register("second", 1, (_, _) => new object());
+            var registered = new List<string>();
+            var registry = new ResettingResultContractRegistry(endpointId =>
+            {
+                registered.Add(endpointId);
+                CapabilityEndpointResultContractRegistration.Reset();
+            });
+
+            var act = () => CapabilityEndpointResultContractRegistration.ApplyTo(registry);
+
+            act.Should().NotThrow();
+            registered.Should().Equal("first", "second");
+        }
+        finally
+        {
+            CapabilityEndpointResultContractRegistration.Reset();
+        }
+    }
+
+    [Fact]
     public void Reset_ClearsAllRegistrations()
     {
         // Arrange
@@ -111,5 +139,14 @@ public sealed class CapabilityEndpointBindingRegistryTests : IDisposable
         // Assert
         var found = CapabilityEndpointBindingRegistry.Find("user.create", 1);
         found.Should().BeNull();
+    }
+
+    private sealed class ResettingResultContractRegistry(Action<string> onRegister) : ICapabilityEndpointResultContractRegistry
+    {
+        public void Register(string endpointId, int version, Func<EndpointExecutionContext, IServiceProvider, object> mapResult)
+            => onRegister(endpointId);
+
+        public Func<EndpointExecutionContext, IServiceProvider, object>? TryGetResultMapper(string endpointId, int version)
+            => null;
     }
 }
