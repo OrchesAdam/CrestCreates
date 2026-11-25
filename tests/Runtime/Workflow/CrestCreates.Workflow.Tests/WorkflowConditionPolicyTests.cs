@@ -7,8 +7,10 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Metadata.Registry;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Accountability;
@@ -27,6 +29,7 @@ public sealed class WorkflowConditionPolicyTests
     {
         WorkflowConditionTokens.PreviousHumanTaskApproved.Should().Be("previous-human-task-approved");
         WorkflowConditionTokens.PreviousHumanTaskRejected.Should().Be("previous-human-task-rejected");
+        WorkflowConditionTokens.AllPriorHumanTasksApproved.Should().Be("all-prior-human-tasks-approved");
     }
 
     [Theory]
@@ -209,8 +212,12 @@ public sealed class WorkflowConditionPolicyTests
             .Should().Be(expected);
     }
 
-    [Fact]
-    public async Task Engine_RejectsLaterInvalidConditionBeforeAnyPersistenceOrTargetExecution()
+    [Theory]
+    [InlineData(null, typeof(WorkflowValidationException))]
+    [InlineData(1, typeof(WorkflowValidationException))]
+    [InlineData(2, typeof(InvalidOperationException))]
+    public async Task Engine_RejectsInvalidConditionOrMissingVersionBeforeAnyEffects(
+        int? requestedVersion, Type expectedException)
     {
         var descriptor = Descriptor(
             new WorkflowStep { Id = "side-effecting", Target = HumanTaskTarget("initial") },
@@ -220,15 +227,18 @@ public sealed class WorkflowConditionPolicyTests
                 Target = HumanTaskTarget("final"),
                 Condition = " "
             });
-        var workflowRegistry = new Mock<IWorkflowRegistry>();
-        workflowRegistry.Setup(registry => registry.GetById(descriptor.Id)).Returns(descriptor);
+        var descriptorProvider = new Mock<IDescriptorProvider<WorkflowDescriptor>>();
+        descriptorProvider.Setup(provider => provider.GetDescriptors()).Returns([descriptor]);
+        var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
+        workflowRegistry.Build([descriptorProvider.Object]);
         var store = new Mock<IWorkflowInstanceStore>();
+        var transactions = new Mock<IRuntimeTransactionCoordinator>();
         var runner = new RecordingRunner();
         var eventPublisher = new RecordingLifecyclePublisher();
         var contexts = new CrestCreates.Accountability.Context.AuditOperationContextAccessor();
         var pinResolver = new ThrowingPinResolver();
         var engine = new WorkflowEngine(
-            workflowRegistry.Object,
+            workflowRegistry,
             store.Object,
             runner,
             eventPublisher,
@@ -238,20 +248,174 @@ public sealed class WorkflowConditionPolicyTests
                 new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer())),
             pinResolver,
             StateRegistry(),
-            transactions: null,
+            transactions.Object,
             new WorkflowAccountabilityOutboxAppender(null, null, null));
 
         var act = () => engine.ExecuteAsync(new WorkflowExecutionRequest
         {
             WorkflowId = descriptor.Id,
+            WorkflowVersion = requestedVersion,
             TenantId = "tenant"
         });
 
-        await act.Should().ThrowAsync<WorkflowValidationException>();
-        store.Verify(value => value.AddAsync(It.IsAny<WorkflowInstance>(), It.IsAny<CancellationToken>()), Times.Never);
+        var error = await Assert.ThrowsAsync(expectedException, act);
+        if (requestedVersion == 2)
+            error.Message.Should().Be($"Workflow '{descriptor.Id}' version 2 not found.");
+        store.VerifyNoOtherCalls();
+        transactions.VerifyNoOtherCalls();
         runner.Calls.Should().Be(0);
         eventPublisher.Calls.Should().Be(0);
     }
+
+    [Fact]
+    public void AllPriorValidation_RequiresPredecessorAndOnlyHumanTaskPredecessors()
+    {
+        var first = Descriptor(new WorkflowStep
+        {
+            Id = "first", Target = HumanTaskTarget("first"),
+            Condition = WorkflowConditionTokens.AllPriorHumanTasksApproved
+        });
+        var nonHumanPrior = Descriptor(
+            new WorkflowStep
+            {
+                Id = "machine", Target = new CapabilityTarget
+                {
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("machine", 1)
+                }
+            },
+            new WorkflowStep
+            {
+                Id = "quality", Target = HumanTaskTarget("quality"),
+                Condition = WorkflowConditionTokens.AllPriorHumanTasksApproved
+            });
+
+        WorkflowConditionPolicy.GetValidationError(first, 0).Should().Contain("at least one preceding HumanTask");
+        WorkflowConditionPolicy.GetValidationError(nonHumanPrior, 1)
+            .Should().Contain("every preceding step").And.Contain("'machine'");
+    }
+
+    [Theory]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved)]
+    [InlineData(WorkflowConditionTokens.AllPriorHumanTasksApproved)]
+    public void AllPriorValidation_AcceptsApprovalGatedPredecessors(string predecessorCondition)
+    {
+        var descriptor = Descriptor(
+            new WorkflowStep { Id = "manager", Target = HumanTaskTarget("manager") },
+            new WorkflowStep
+            {
+                Id = "machine-test", Target = HumanTaskTarget("machine-test"),
+                Condition = predecessorCondition
+            },
+            new WorkflowStep
+            {
+                Id = "quality", Target = HumanTaskTarget("quality"),
+                Condition = WorkflowConditionTokens.AllPriorHumanTasksApproved
+            });
+
+        WorkflowConditionPolicy.ValidateDescriptor(descriptor).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AllPriorValidation_RejectsRejectionGatedPredecessor()
+    {
+        var descriptor = Descriptor(
+            new WorkflowStep { Id = "manager", Target = HumanTaskTarget("manager") },
+            new WorkflowStep
+            {
+                Id = "rework", Target = HumanTaskTarget("rework"),
+                Condition = WorkflowConditionTokens.PreviousHumanTaskRejected
+            },
+            new WorkflowStep
+            {
+                Id = "quality", Target = HumanTaskTarget("quality"),
+                Condition = WorkflowConditionTokens.AllPriorHumanTasksApproved
+            });
+
+        WorkflowConditionPolicy.GetValidationError(descriptor, 2)
+            .Should().Contain("only approval-gated conditional predecessors").And.Contain("'rework'");
+    }
+
+    [Fact]
+    public void AllPriorEvaluation_UsesPerStepProofAndShortCircuitsAtFirstRejection()
+    {
+        var descriptor = ThreeGates();
+        var instance = new WorkflowInstance { StepIndex = 2 };
+        instance.StepResults.Add(CompletedHumanTask("manager", CompletionCondition.Reject));
+        instance.StepResults.Add(new WorkflowStepResult
+        {
+            StepId = "machine-test", Status = StepExecutionStatus.Skipped
+        });
+
+        WorkflowConditionPolicy.Evaluate(descriptor, instance, 2, StateRegistry()).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AllPriorEvaluation_RequiresEveryApprovalProof()
+    {
+        var descriptor = ThreeGates();
+        var instance = new WorkflowInstance { StepIndex = 2 };
+        instance.StepResults.Add(CompletedHumanTask("manager", CompletionCondition.Approve));
+        instance.StepResults.Add(CompletedHumanTask("machine-test", CompletionCondition.Approve));
+        instance.Variables["lastStepOutcome"] = StateRegistry().Capture("Approve");
+
+        WorkflowConditionPolicy.Evaluate(descriptor, instance, 2, StateRegistry()).Should().BeTrue();
+
+        instance.StepResults[1] = new WorkflowStepResult
+        {
+            StepId = "machine-test", Status = StepExecutionStatus.Completed
+        };
+        var act = () => WorkflowConditionPolicy.Evaluate(descriptor, instance, 2, StateRegistry());
+        act.Should().Throw<WorkflowValidationException>().WithMessage("*persisted HumanTask outcome evidence*machine-test*");
+    }
+
+    [Fact]
+    public void AllPriorEvaluation_FailsOnMissingOrMalformedProofBeforeLaterRejection()
+    {
+        var descriptor = ThreeGates();
+        var instance = new WorkflowInstance { StepIndex = 2 };
+        instance.StepResults.Add(new WorkflowStepResult
+        {
+            StepId = "manager", Status = StepExecutionStatus.Completed
+        });
+        instance.StepResults.Add(CompletedHumanTask("machine-test", CompletionCondition.Reject));
+
+        var act = () => WorkflowConditionPolicy.Evaluate(descriptor, instance, 2, StateRegistry());
+        act.Should().Throw<WorkflowValidationException>().WithMessage("*outcome evidence*manager*");
+
+        instance.StepResults[0] = CompletedHumanTask("manager", (CompletionCondition)99);
+        act.Should().Throw<WorkflowValidationException>().WithMessage("*malformed persisted HumanTask outcome*manager*");
+    }
+
+    [Fact]
+    public void Snapshot_PreservesTypedHumanTaskProofWithoutSharingResultList()
+    {
+        var instance = new WorkflowInstance();
+        instance.StepResults.Add(CompletedHumanTask("manager", CompletionCondition.Approve));
+
+        var snapshot = instance.Snapshot();
+        snapshot.StepResults.Should().NotBeSameAs(instance.StepResults);
+        snapshot.StepResults[0].HumanTaskOutcome.Should().Be(CompletionCondition.Approve);
+        snapshot.StepResults.Clear();
+        instance.StepResults.Should().ContainSingle();
+    }
+
+    private static WorkflowDescriptor ThreeGates() => Descriptor(
+        new WorkflowStep { Id = "manager", Target = HumanTaskTarget("manager") },
+        new WorkflowStep
+        {
+            Id = "machine-test", Target = HumanTaskTarget("machine-test"),
+            Condition = WorkflowConditionTokens.PreviousHumanTaskApproved
+        },
+        new WorkflowStep
+        {
+            Id = "quality", Target = HumanTaskTarget("quality"),
+            Condition = WorkflowConditionTokens.AllPriorHumanTasksApproved
+        });
+
+    private static WorkflowStepResult CompletedHumanTask(string id, CompletionCondition outcome) => new()
+    {
+        StepId = id, Status = StepExecutionStatus.Completed, HumanTaskOutcome = outcome
+    };
 
     private static WorkflowDescriptor Descriptor(params WorkflowStep[] steps) => new()
     {

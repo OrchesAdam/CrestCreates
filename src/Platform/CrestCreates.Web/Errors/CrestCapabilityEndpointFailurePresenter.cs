@@ -82,13 +82,16 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
         }
 
         var authenticated = context.User.Identity?.IsAuthenticated == true;
-        var kind = facts.Kind == CapabilityFailureKind.Unauthorized && authenticated
+        var authenticatedUnauthorized = facts.Kind == CapabilityFailureKind.Unauthorized && authenticated;
+        var kind = authenticatedUnauthorized
             ? CapabilityFailureKind.Forbidden
             : facts.Kind;
-        var errorCode = kind == CapabilityFailureKind.Forbidden
-                        && facts.Kind == CapabilityFailureKind.Unauthorized
+        var errorCode = authenticatedUnauthorized
             ? CrestErrorCodes.AuthForbidden
             : facts.ErrorCode;
+        var safeMessage = authenticatedUnauthorized
+            ? "没有权限执行当前操作。"
+            : facts.SafeMessage;
 
         var statusCode = kind switch
         {
@@ -108,7 +111,7 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
         // chosen above, so there is no second message table to drift from the platform authority.
         var response = converter.Convert(
             context,
-            new CapabilityFailureWireException(errorCode, statusCode, facts.SafeMessage, facts.SafeDetails)).Response;
+            new CapabilityFailureWireException(errorCode, statusCode, safeMessage, facts.SafeDetails)).Response;
 
         return Results.Json(
             response,

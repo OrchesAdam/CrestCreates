@@ -1,13 +1,16 @@
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Sample.AssetManagement.Contracts;
+using CrestCreates.Sample.AssetManagement.Host.ProductionRelease;
 
 namespace CrestCreates.Sample.AssetManagement.Host;
 
 public enum AssetMaintenanceTaskRole
 {
     Initial,
-    Terminal
+    Terminal,
+    TrialEvidence,
+    Quality
 }
 
 /// <summary>
@@ -36,6 +39,10 @@ public sealed class AssetMaintenanceTaskContractResolver
             return AssetMaintenanceTaskRole.Initial;
         if (Matches(pin, AssetDescriptorCatalog.MaintenanceHumanTask))
             return AssetMaintenanceTaskRole.Terminal;
+        if (Matches(pin, AssetProductionDescriptors.TrialTask))
+            return AssetMaintenanceTaskRole.TrialEvidence;
+        if (Matches(pin, AssetProductionDescriptors.QualityTask))
+            return AssetMaintenanceTaskRole.Quality;
         throw new InvalidOperationException("The maintenance HumanTask pin is not a known compiled Asset contract.");
     }
 

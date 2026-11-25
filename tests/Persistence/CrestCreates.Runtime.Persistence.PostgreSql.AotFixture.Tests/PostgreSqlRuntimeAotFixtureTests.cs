@@ -43,12 +43,45 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
             var execution = await RunScenarioAsync();
             execution.ExitCode.Should().Be(0, execution.Output);
+            execution.Output.Should().Contain("CRESTCREATES_AGENT_EXECUTION_PERSISTENCE_NATIVE_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK");
+            foreach (var sentinel in new[]
+                     {
+                         "CRESTCREATES_AGENT_MODE_REACT_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_PLAN_AND_EXECUTE_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_SEQUENTIAL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_PARALLEL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_SUPERVISOR_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_HANDOFF_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_GROUP_CHAT_NATIVE_OK",
+                         "CRESTCREATES_AGENT_MODE_HUMAN_IN_THE_LOOP_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_PLAN_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_PARALLEL_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_HANDOFF_NATIVE_OK",
+                         "CRESTCREATES_AGENT_REPLAY_HUMAN_IN_THE_LOOP_NATIVE_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_OLD_EPOCH_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CROSS_TENANT_EVENT_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_DUPLICATE_DISPATCH_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_LATE_RESULT_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_INVALID_JSON_IDENTITY_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_INVALID_JSON_REVISION_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_UNKNOWN_SELECTOR_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CONTROLS_OK",
+                         "CRESTCREATES_AGENT_CRASH_HANDOFF_ACCEPT_OK",
+                         "CRESTCREATES_AGENT_CRASH_EVENT_RESUME_OK",
+                         "CRESTCREATES_AGENT_CRASH_PARALLEL_CLAIM_OK",
+                         "CRESTCREATES_AGENT_ORCHESTRATION_CRASH_WINDOWS_OK"
+                     })
+            {
+                execution.Output.Should().Contain(sentinel, execution.Output);
+            }
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
             execution.Output.Should().Contain("PHASE9C_POSTGRES_OUTBOX_AOT_OK");
             execution.Output.Should().Contain("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+            execution.Output.Should().Contain("CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK");
             execution.Output.Should().Contain("CRESTCREATES_RUNTIME_OUTBOX_OK");
             execution.Output.Should().Contain("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
             execution.Output.Should().Contain("CRESTCREATES_POSTGRES_AUDIT_SINK_DUPLICATE_AFTER_RESTART_OK");
@@ -99,6 +132,23 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 controlExecution.Output.Should().NotContain(
                     "CRESTCREATES_AUDIT_RETENTION_NATIVE_OK",
                     $"retention negative control '{control}' must not emit the aggregate sentinel");
+            }
+
+            foreach (var control in new[]
+                     {
+                         "old-epoch", "cross-tenant-event", "duplicate-dispatch", "late-result",
+                         "invalid-json-identity", "invalid-json-revision", "unknown-selector"
+                     })
+            {
+                var controlExecution = await RunScenarioAsync("orchestration-negative", control);
+                controlExecution.ExitCode.Should().NotBe(0,
+                    $"orchestration negative control '{control}' must fail closed: {controlExecution.Output}");
+                controlExecution.Output.Should().Contain(
+                    $"CRESTCREATES_AGENT_ORCHESTRATION_NEGATIVE_CAUGHT {control}:",
+                    controlExecution.Output);
+                controlExecution.Output.Should().NotContain(
+                    "CRESTCREATES_AGENT_ORCHESTRATION_NATIVE_OK",
+                    $"orchestration negative control '{control}' must not emit the aggregate sentinel");
             }
 
             Task<(int ExitCode, string Output)> RunScenarioAsync(params string[] arguments)

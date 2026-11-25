@@ -17,6 +17,7 @@ namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 /// counterfactual for a formal declaration whose toolchain is not assembled.
 /// </summary>
 [Collection("CrudBuild")]
+[Trait("Category", "MSBuild")]
 public class CrudJsonContractMsBuildBaselineTests
 {
     internal const string ToolchainImports = """
@@ -79,6 +80,8 @@ public class CrudJsonContractMsBuildBaselineTests
     /// official STJ generator inside the same CoreCompile. Includes the error DTO the failure path
     /// writes (ProblemDetails), so a failure response never degrades into an unserializable 500.
     /// </summary>
+    private static readonly Lazy<Task<ProbeBuild>> DefaultProbe = new(() => RunProbeAsync(withToolchain: true));
+
     private static readonly string[] RequiredCrudRoots =
     [
         "global::Shop.Application.Products.Contracts.ProductDto",
@@ -97,7 +100,7 @@ public class CrudJsonContractMsBuildBaselineTests
     [Fact]
     public async Task Clean_probe_directory_exposes_the_same_build_producer_output_and_a_sound_closure()
     {
-        var probe = await RunProbeAsync(withToolchain: true);
+        var probe = await DefaultProbe.Value;
 
         probe.ProducerFiles.Should().NotBeEmpty(
             "the CRUD producer must materialize output inside the build that is being inspected");
@@ -115,7 +118,7 @@ public class CrudJsonContractMsBuildBaselineTests
     {
         // §5.1: DTOs are named after typeof(Product) and live in the Contracts namespace below the
         // declaring service namespace. The materialized surface is read as ordinary Compile output.
-        var probe = await RunProbeAsync(withToolchain: true);
+        var probe = await DefaultProbe.Value;
 
         var bundle = probe.BundleSource;
         bundle.Should().Contain("class ProductDto",
@@ -132,7 +135,7 @@ public class CrudJsonContractMsBuildBaselineTests
         // The CRUD surface used to call mapper members produced by another generator in the same
         // round, so a consumer project could not compile. The materialized bundle plus the sibling
         // generators inside one CoreCompile must build.
-        var probe = await RunProbeAsync(withToolchain: true);
+        var probe = await DefaultProbe.Value;
 
         probe.ExitCode.Should().Be(0,
             "the generated CRUD surface must compile against the mapping output of the same build; observed:\n"
@@ -142,7 +145,7 @@ public class CrudJsonContractMsBuildBaselineTests
     [Fact]
     public async Task Formal_msbuild_build_must_close_crud_json_roots_in_the_same_build()
     {
-        var probe = await RunProbeAsync(withToolchain: true);
+        var probe = await DefaultProbe.Value;
 
         probe.ExitCode.Should().Be(0, "one build must close the CRUD JSON roots; observed:\n" + probe.Output);
         probe.Output.Should().NotContain("SYSLIB1030",
@@ -159,8 +162,9 @@ public class CrudJsonContractMsBuildBaselineTests
 
         jsonContractsSource.Should().Contain("CrestCreatesCrudJsonSerializerContext",
             "the CRUD roots must be registered on one generated context");
+        // Other source-generation options may follow the naming policy.
         jsonContractsSource.Should().Contain(
-            "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)",
+            "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase",
             "HTTP CRUD uses the camelCase policy of §7.1");
 
         // #128 S4: the *whole compilation* must stay free of the legacy Dynamic API surface for a
@@ -354,7 +358,7 @@ public class CrudJsonContractMsBuildBaselineTests
 
             var buildResult = await RunDotnetAsync(
                 repoRoot,
-                $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo",
+                $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false -p:UseSharedCompilation=false --nologo",
                 TimeSpan.FromMinutes(12));
 
             // The probe directory is deleted once the build is inspected, so every artifact the
@@ -400,7 +404,7 @@ public class CrudJsonContractMsBuildBaselineTests
 
         await RunDotnetAsync(
             repoRoot,
-            "build \"src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj\" -p:NuGetAudit=false --nologo -v q",
+            "build \"src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj\" -p:NuGetAudit=false -p:UseSharedCompilation=false --nologo -v q",
             TimeSpan.FromMinutes(12));
     }
 

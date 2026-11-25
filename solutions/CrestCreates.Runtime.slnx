@@ -39,6 +39,7 @@
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj" />
@@ -111,6 +112,7 @@
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions.Tests/CrestCreates.Agent.Tools.Abstractions.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/CrestCreates.Agent.Tools.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Orchestration.Tests/CrestCreates.Agent.Orchestration.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests/CrestCreates.Agent.Tools.E2E.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.E2E.Tests/CrestCreates.Agent.Memory.Tools.E2E.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests/CrestCreates.Agent.Memory.Tools.AotFixture.Tests.csproj" />

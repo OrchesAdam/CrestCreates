@@ -11,6 +11,7 @@ public static class AssetContractIds
     public const string TransferCapability = "asset-management.assets.transfer";
     public const string RequestMaintenanceCapability = "asset-management.assets.request-maintenance";
     public const string ApplyMaintenanceCapability = "asset-management.assets.apply-maintenance";
+    public const string CompleteMaintenanceTaskCapability = "asset-management.assets.complete-maintenance-task";
 
     public const string RegisterTool = "asset_register";
     public const string GetTool = "asset_get";

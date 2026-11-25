@@ -462,8 +462,12 @@ public static class CrudNativeGate
             outcome.Status == 500,
             $"the rollback probe must fail after the store write, got {outcome.Status}: {outcome.Body}");
         Check(
-            outcome.Body.Contains("rollback probe", StringComparison.Ordinal),
-            "the failure body must carry the persistence-layer rejection");
+            outcome.Body.Contains("服务器内部错误。", StringComparison.Ordinal) &&
+            outcome.Body.Contains("Crest.InternalError", StringComparison.Ordinal),
+            "the failure body must carry bounded internal-error facts");
+        Check(
+            !outcome.Body.Contains(MemoryWidgetRepository.RollbackProbeMessage, StringComparison.Ordinal),
+            "the failure body must not expose the raw persistence exception");
 
         var after = context.Observer.Capture();
         Check(after.BeginCount - before.BeginCount == 1, "the failing write must begin one unit of work");
@@ -502,8 +506,12 @@ public static class CrudNativeGate
             staleUpdate.Status == 500,
             $"a stale stamp must be rejected, got {staleUpdate.Status}: {staleUpdate.Body}");
         Check(
-            staleUpdate.Body.Contains("Concurrency conflict", StringComparison.Ordinal),
-            "the rejection body must carry the optimistic-concurrency contract");
+            staleUpdate.Body.Contains("服务器内部错误。", StringComparison.Ordinal) &&
+            staleUpdate.Body.Contains("Crest.InternalError", StringComparison.Ordinal),
+            "the rejection body must carry bounded internal-error facts");
+        Check(
+            !staleUpdate.Body.Contains("Concurrency conflict", StringComparison.Ordinal),
+            "the rejection body must not expose the raw concurrency exception");
         Check(
             !staleUpdate.Body.Contains("stale", StringComparison.Ordinal),
             "the rejected update must not be echoed as applied");

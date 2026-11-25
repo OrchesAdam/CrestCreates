@@ -15,6 +15,7 @@ namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 public sealed class CrudBuildCollection { }
 
 [Collection("CrudBuild")]
+[Trait("Category", "MSBuild")]
 public class CrudBuildLifecycleTests
 {
     [Fact]
@@ -212,6 +213,7 @@ public class CrudBuildLifecycleTests
             }
         }
         public string Directory {get; private init;} = "";
+        private bool _restoreCurrent;
         public string File => Path.Combine(Directory, "Probe.csproj");
         public string Intermediate => Path.Combine(Directory, "obj", "Debug", "net10.0");
         public string Artifact(string name) => Path.Combine(Intermediate, name);
@@ -255,19 +257,37 @@ public class CrudBuildLifecycleTests
                     .Replace("<RestoreSources>feed</RestoreSources>", "")
                     .Replace("</Project>", CrudJsonContractMsBuildBaselineTests.ToolchainImports.Replace("__ROOT__", Root) + "</Project>");
             await System.IO.File.WriteAllTextAsync(File, xml);
+            _restoreCurrent = false;
         }
         public async Task<Result> DesignTime()
         {
-            (await Run("restore", File)).Success();
+            if (!_restoreCurrent)
+            {
+                (await Run("restore", File)).Success();
+            }
             return await Run("msbuild", File, "-t:Compile", "-p:DesignTimeBuild=true",
                 "-p:BuildingInsideVisualStudio=true", "-p:SkipCompilerExecution=true");
         }
-        public Task<Result> Build(params string[] options) => Run(new[] {"build", File}.Concat(options).ToArray());
+        public async Task<Result> Build(params string[] options)
+        {
+            var args = new[] {"build", File}.Concat(options).ToList();
+            if (_restoreCurrent && !options.Any(option => option is "-r" or "--runtime" or "--force"))
+            {
+                args.Add("--no-restore");
+            }
+            var result = await Run(args.ToArray());
+            if (result.ExitCode == 0)
+            {
+                _restoreCurrent = true;
+            }
+            return result;
+        }
         public async Task<Result> Run(params string[] args)
         {
             var start = new ProcessStartInfo("dotnet") {WorkingDirectory=Directory,RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false};
             foreach (var arg in args) start.ArgumentList.Add(arg);
             start.ArgumentList.Add("-p:NuGetAudit=false"); start.ArgumentList.Add("-p:BuildInParallel=false");
+            start.ArgumentList.Add("-p:UseSharedCompilation=false");
             start.ArgumentList.Add("-m:1"); start.ArgumentList.Add("--nologo"); start.ArgumentList.Add("-v:q");
             start.Environment["DOTNET_CLI_UI_LANGUAGE"]="en";
             start.Environment["MSBUILDDISABLENODEREUSE"]="1";
@@ -275,6 +295,10 @@ public class CrudBuildLifecycleTests
             var stdout=process.StandardOutput.ReadToEndAsync(); var stderr=process.StandardError.ReadToEndAsync();
             using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(5));
             try {await process.WaitForExitAsync(timeout.Token);} catch(OperationCanceledException){process.Kill(true);throw;}
+            if (args.Length > 0 && args[0] == "restore" && process.ExitCode == 0)
+            {
+                _restoreCurrent = true;
+            }
             return new Result(process.ExitCode, await stdout+await stderr);
         }
         public ValueTask DisposeAsync() {System.IO.Directory.Delete(Directory,true);return ValueTask.CompletedTask;}

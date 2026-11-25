@@ -81,6 +81,7 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
             "runtime_audit_envelopes",
             "runtime_outbox_messages",
             "runtime_workflow_continuation_acceptances",
+            "runtime_workflow_continuation_resume_claims",
             "runtime_audit_retention_ledger",
             "runtime_audit_retention_scope_locks",
             "runtime_audit_retention_runs",

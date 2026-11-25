@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -11,6 +12,7 @@ using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.Retention;
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Agent.Orchestration;
 using CrestCreates.Agent.Tools;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -49,7 +51,7 @@ using Microsoft.Extensions.Logging;
 
 if (args.Length is not (2 or 3 or 4))
 {
-    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario] | <connection-string> <schema> retention-negative <wrong-count|hold-filter|receipt-fault>");
+    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario] | <connection-string> <schema> retention-negative <wrong-count|hold-filter|receipt-fault> | <connection-string> <schema> orchestration-negative <control>");
     return 2;
 }
 
@@ -58,10 +60,13 @@ var options = new PostgreSqlRuntimePersistenceOptions { ConnectionString = args[
 // Child mode: CrashWorker-style subprocess that performs the durable pre-dispatch
 // writes for one crash window, prints the commit sentinel (with AttemptId), then
 // waits to be killed while the committed state stays durable in PostgreSQL.
+if (args.Length == 3 && args[2].StartsWith("orchestration-crash-", StringComparison.Ordinal))
+    return await AgentOrchestrationNativeScenario.RunCrashChildAsync(options, args[2]);
+
 if (args.Length == 3)
     return await RunPreDispatchCrashChildAsync(options, args[2]);
 
-if (args.Length == 4 && args[2] != "retention-negative")
+if (args.Length == 4 && args[2] is not ("retention-negative" or "orchestration-negative"))
 {
     Console.Error.WriteLine($"Unknown mode '{args[2]}'.");
     return 2;
@@ -69,9 +74,14 @@ if (args.Length == 4 && args[2] != "retention-negative")
 
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
 
+if (args.Length == 4 && args[2] == "orchestration-negative")
+    return await AgentOrchestrationNativeScenario.RunNegativeControlAsync(options, args[3]);
+
 if (args.Length == 4)
     return await RunAuditRetentionNegativeControlAsync(options, args[3]);
 
+await RunAgentExecutionPersistenceAsync(options);
+await AgentOrchestrationNativeScenario.RunAsync(options);
 await RunControlPlaneReferenceDataMainlineAsync(options);
 await RunVersionedOrganizationCacheAotScenarioAsync(options);
 
@@ -254,16 +264,23 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
         AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
         Services = services
     });
-    var acceptance = await services.GetRequiredService<IWorkflowContinuationAcceptanceStore>()
-        .GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
+    var acceptanceStore = services.GetRequiredService<IWorkflowContinuationAcceptanceStore>();
+    var acceptance = await acceptanceStore.GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
     var humanTaskAck = await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease);
+    var resumeReplay = acceptance is null
+        ? (WorkflowContinuationResumeClaimResult.AcceptanceMissing, (WorkflowContinuationResumeClaim?)null)
+        : await acceptanceStore.TryClaimResumeAsync(acceptance, new WorkflowContinuationResumeLease(
+            "aot-continuation-replay", claim.Lease.Fence + 1, claim.Lease.ExpiresAt));
     if (deliveryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
         || acceptance is null
+        || acceptance.RunOperationId != completed.CompletionEventId
+        || resumeReplay.Item1 != WorkflowContinuationResumeClaimResult.NoResumeRequired
         || humanTaskAck is not OutboxDeliveryMutationResult.Applied)
     {
         return 9;
     }
     Console.WriteLine("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+    Console.WriteLine("CRESTCREATES_WORKFLOW_CONTINUATION_RESUME_NATIVE_OK");
     Console.WriteLine("CRESTCREATES_RUNTIME_OUTBOX_OK");
     Console.WriteLine("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
 
@@ -403,39 +420,55 @@ static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistence
         {
             ApplicationName = applicationName
         };
+        var processPath = Environment.ProcessPath ?? throw new InvalidOperationException("ProcessPath unavailable");
+        var hostPrefix = string.Equals(Path.GetFileName(processPath), "dotnet", StringComparison.OrdinalIgnoreCase)
+            ? $"\"{Environment.GetCommandLineArgs()[0]}\" "
+            : string.Empty;
         using var child = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = Environment.ProcessPath ?? throw new InvalidOperationException("ProcessPath unavailable"),
-                Arguments = $"\"{connectionBuilder.ConnectionString}\" {options.Schema} {scenario.Scenario}",
+                FileName = processPath,
+                Arguments = $"{hostPrefix}\"{connectionBuilder.ConnectionString}\" {options.Schema} {scenario.Scenario}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false
             }
         };
         child.Start();
-        using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-        var stderrTask = child.StandardError.ReadToEndAsync(readyTimeout.Token);
         string? attemptId = null;
-        while (await child.StandardOutput.ReadLineAsync(readyTimeout.Token) is { } line)
+        try
         {
-            if (line.StartsWith(scenario.Sentinel, StringComparison.Ordinal))
+            using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            var stderrTask = child.StandardError.ReadToEndAsync(readyTimeout.Token);
+            while (await child.StandardOutput.ReadLineAsync(readyTimeout.Token) is { } line)
             {
-                var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                attemptId = parts.Length == 2 ? parts[1] : null;
-                break;
+                if (line.StartsWith(scenario.Sentinel, StringComparison.Ordinal))
+                {
+                    var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    attemptId = parts.Length == 2 ? parts[1] : null;
+                    break;
+                }
+            }
+            if (attemptId is null)
+            {
+                var stderr = child.HasExited ? await stderrTask : "Crash worker is still running.";
+                throw new InvalidOperationException(
+                    $"[{scenario.Scenario}] Crash worker produced no sentinel. Stderr: {stderr}");
+            }
+
+            child.Kill(entireProcessTree: true);
+            await child.WaitForExitAsync();
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+                await child.WaitForExitAsync();
             }
         }
-        if (attemptId is null)
-        {
-            var stderr = await stderrTask;
-            throw new InvalidOperationException(
-                $"[{scenario.Scenario}] Crash worker produced no sentinel. Stderr: {stderr}");
-        }
 
-        child.Kill(entireProcessTree: true);
-        await child.WaitForExitAsync();
         await WaitForBackendExitAsync(options.ConnectionString, applicationName);
 
         var key = new AgentToolLogicalInvocationKey("tenant", "user", "agent", "exec", scenario.Scenario);
@@ -879,6 +912,55 @@ static async Task DispatchConditionalCompletionAsync(IServiceProvider services, 
     {
         throw new InvalidOperationException("NativeAOT conditional completion dispatch was not accepted.");
     }
+}
+
+static async Task RunAgentExecutionPersistenceAsync(PostgreSqlRuntimePersistenceOptions options)
+{
+    var key = new AgentExecutionKey("native-agent", Guid.NewGuid());
+    var owner = new AgentRunOwner(key.RootRunId, "coordinator", 1);
+    var wait = new AgentEventWait(Guid.NewGuid(), new("workflow", "completed", "native"));
+    var artifact = new AgentArtifactReference("native-result", "sha256:123");
+    var delivery = new AgentEventDelivery("native-event", key.TenantId, wait.Selector, artifact);
+    var nextOwner = owner with { AgentId = "recipient", Epoch = 2 };
+    var reservationId = Guid.NewGuid();
+    using var json = JsonDocument.Parse("""{"value":42}""");
+    var reservation = new AgentBudgetReservation(new(10, 1), new(8, 1))
+    {
+        ModelDecision = new(new("lookup", json.RootElement), null),
+        ToolObservation = new("ok", true, json.RootElement)
+    };
+    var run = new AgentRunSnapshot(nextOwner, "native-task", new(90, 1), ["lookup"], [artifact], null,
+        [new(new(Guid.NewGuid(), nextOwner.AgentId, ["lookup"], [artifact]), owner, nextOwner)],
+        wait, [new(wait, delivery, owner.Epoch)],
+        ImmutableDictionary<Guid, AgentBudgetReservation>.Empty.Add(reservationId, reservation), null);
+    var initial = new AgentExecutionSnapshot(key, 0, "native-actor", DateTimeOffset.UnixEpoch.AddDays(1),
+        ImmutableDictionary<Guid, AgentRunSnapshot>.Empty.Add(key.RootRunId, run));
+
+    await using (var first = new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider())
+    {
+        var store = first.GetRequiredService<IAgentExecutionStore>();
+        if (!await store.TryCreateAsync(initial, default) || await store.TryCreateAsync(initial, default) ||
+            !await store.TryReplaceAsync(initial with { Revision = 1 }, 0, default) ||
+            await store.TryReplaceAsync(initial with { Revision = 1 }, 0, default) ||
+            await store.TryReplaceAsync(initial with { Revision = 3 }, 1, default))
+            throw new InvalidOperationException("Native Agent execution CAS regression.");
+    }
+
+    await using var second = new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
+    var reloadedStore = second.GetRequiredService<IAgentExecutionStore>();
+    var read = await reloadedStore.FindAsync(key, default);
+    if (read is null || read.Revision != 1 || read.ActorId != initial.ActorId || read.Deadline != initial.Deadline)
+        throw new InvalidOperationException("Native Agent execution recovery regression.");
+    var reloaded = read.Runs[key.RootRunId];
+    var usage = reloaded.Reservations[reservationId];
+    if (reloaded.Owner != nextOwner || reloaded.Wait != wait || reloaded.Resumptions[0].Delivery != delivery ||
+        reloaded.Handoffs[0].AcceptedOwner != nextOwner || usage.Used != reservation.Used ||
+        usage.ModelDecision?.Tool?.Arguments?.GetProperty("value").GetInt32() != 42 ||
+        usage.ToolObservation?.StructuredOutput?.GetProperty("value").GetInt32() != 42 ||
+        await reloadedStore.FindAsync(key with { TenantId = null }, default) is not null ||
+        await reloadedStore.FindAsync(key with { TenantId = "Native-agent" }, default) is not null)
+        throw new InvalidOperationException("Native Agent execution typed state or scope regression.");
+    Console.WriteLine("CRESTCREATES_AGENT_EXECUTION_PERSISTENCE_NATIVE_OK");
 }
 
 static async Task RunControlPlaneReferenceDataMainlineAsync(PostgreSqlRuntimePersistenceOptions options)

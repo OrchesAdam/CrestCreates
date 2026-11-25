@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading;
 using CrestCreates.AspNetCore.Errors;
 using CrestCreates.Capability.Abstractions;
@@ -14,6 +15,37 @@ namespace CrestCreates.Web.Tests;
 
 public sealed class ReviewS3R2ResponseSuppressionProbes
 {
+    [Theory]
+    [InlineData(false, 401, "Crest.Auth.Unauthorized", "当前请求未认证。")]
+    [InlineData(true, 403, "Crest.Auth.Forbidden", "没有权限执行当前操作。")]
+    public void UnauthorizedFacts_UseAuthenticationConsistentWire(
+        bool authenticated, int expectedStatus, string expectedCode, string expectedMessage)
+    {
+        using var provider = new ServiceCollection().AddLogging()
+            .AddSingleton(new CrestExceptionLocalizationResources(
+                new Dictionary<string, IReadOnlyDictionary<string, string>>()))
+            .AddSingleton<ICrestExceptionConverter, DefaultCrestExceptionConverter>()
+            .AddSingleton<ICapabilityExceptionClassifier, CrestCapabilityExceptionClassifier>()
+            .AddSingleton<ICapabilityEndpointFailurePresenter, CrestCapabilityEndpointFailurePresenter>()
+            .BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = provider };
+        if (authenticated)
+            context.User = new ClaimsPrincipal(new ClaimsIdentity([], "test"));
+        var execution = CapabilityExecutionResult.Failure(
+            "UNAUTHORIZED", "raw authorization detail", TimeSpan.Zero,
+            failureFacts: new CapabilityFailureFacts(
+                CapabilityFailureKind.Unauthorized, "Crest.Auth.Unauthorized", "当前请求未认证。"));
+
+        var wire = provider.GetRequiredService<ICapabilityEndpointFailurePresenter>().Present(execution, context);
+
+        wire.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(expectedStatus);
+        var result = wire.Should().BeAssignableTo<IValueHttpResult>().Which;
+        var response = result.Value.Should().BeOfType<CrestErrorResponse>().Which;
+        response.StatusCode.Should().Be(expectedStatus);
+        response.Code.Should().Be(expectedCode);
+        response.Message.Should().Be(expectedMessage);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

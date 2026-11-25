@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
@@ -29,6 +30,7 @@ internal sealed record TenantProjectInput(
 internal static class TenantIdentityProjectInventory
 {
     private static readonly StringComparer OrdinalPath = StringComparer.Ordinal;
+    private static readonly ConcurrentDictionary<string, MetadataReference> MetadataReferences = new(OrdinalPath);
 
     public static IReadOnlyList<string> EnumerateProjectFiles(string repoRoot)
     {
@@ -192,7 +194,7 @@ internal static class TenantIdentityProjectInventory
 
         var references = paths
             .Where(File.Exists)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+            .Select(path => MetadataReferences.GetOrAdd(path, static file => MetadataReference.CreateFromFile(file)))
             .ToArray();
 
         if (references.Length == 0)

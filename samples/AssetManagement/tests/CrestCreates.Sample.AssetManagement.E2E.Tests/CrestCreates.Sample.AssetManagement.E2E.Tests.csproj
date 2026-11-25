@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Host/CrestCreates.Sample.AssetManagement.Host.csproj" />
+    <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Mes/CrestCreates.Sample.AssetManagement.Mes.csproj" />
+    <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.MicrosoftAgent/CrestCreates.Sample.AssetManagement.MicrosoftAgent.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj" />

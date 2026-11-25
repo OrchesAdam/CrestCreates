@@ -44,4 +44,15 @@ public static partial class AssetEndpoints
     [CapabilityEndpointInput(typeof(MaintenanceRequestInput), Name = "body", Source = CapabilityEndpointParameterSource.Body)]
     [CapabilityEndpointInput(typeof(Guid), Name = "assetId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(MaintenanceRequestInput.AssetId))]
     public sealed partial class RequestMaintenance;
+
+    [CapabilityEndpointSpec(AssetContractIds.CompleteMaintenanceTaskCapability, CapabilityEndpointHttpMethod.Post, "/api/assets/{assetId:guid}/maintenance/tasks/{humanTaskId}/complete", SuccessStatusCode = 200, GroupName = "Asset Management", Tags = new[] { "Maintenance" })]
+    [CapabilityEndpointInput(typeof(MaintenanceTaskCompletionInput), Name = "body", Source = CapabilityEndpointParameterSource.Body)]
+    [CapabilityEndpointInput(typeof(Guid), Name = "assetId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(MaintenanceTaskCompletionInput.AssetId))]
+    [CapabilityEndpointInput(typeof(string), Name = "humanTaskId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(MaintenanceTaskCompletionInput.HumanTaskId))]
+    public sealed partial class CompleteMaintenanceTask;
+
+    [CapabilityEndpointSpec(ProductionRelease.AssetProductionDescriptors.ReleaseCapabilityId, CapabilityEndpointHttpMethod.Post, "/api/assets/{assetId:guid}/production-release", SuccessStatusCode = 200, GroupName = "Asset Management", Tags = new[] { "Maintenance" })]
+    [CapabilityEndpointInput(typeof(AssetProductionReleaseInput), Name = "body", Source = CapabilityEndpointParameterSource.Body)]
+    [CapabilityEndpointInput(typeof(Guid), Name = "assetId", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(AssetProductionReleaseInput.AssetId))]
+    public sealed partial class ReleaseProduction;
 }

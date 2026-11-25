@@ -17,6 +17,8 @@ public interface IAssetStore
 public interface IAssetMaintenanceWorkflowStarter
 {
     Task<AssetMaintenanceWorkflowLease> StartAsync(Guid assetId, string tenantId, string requesterId, CancellationToken cancellationToken = default);
+    Task ConfirmStartedAsync(Guid assetId, string tenantId, AssetMaintenanceWorkflowLease lease, CancellationToken cancellationToken = default);
+    Task<AssetMaintenanceWorkflowLease?> TryRecoverStartAsync(Guid assetId, string tenantId, string requesterId, string workflowInstanceId, CancellationToken cancellationToken = default);
     Task AbortAsync(AssetMaintenanceWorkflowLease lease, string reason, CancellationToken cancellationToken = default);
 }
 

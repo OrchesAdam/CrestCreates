@@ -207,6 +207,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ,"runtime_audit_retention_batches"
             ,"runtime_audit_retention_holds"
             ,"runtime_audit_retention_hold_receipts"
+            ,"agent_executions"
+            ,"runtime_workflow_continuation_resume_claims"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -671,6 +673,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
         public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
         [
+            new("agent_executions", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["root_run_id"] = ("uuid", "NO", null),
+                ["revision"] = BigInt, ["state_json"] = Json
+            }, ["tenant_scope_kind", "tenant_id", "root_run_id"],
+            [new("ck_agent_executions_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_agent_executions_revision", "check (revision >= 0)")], [], []),
             new("runtime_workflow_instances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
@@ -1101,6 +1110,16 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)],
              [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", DeleteAction: "RESTRICT"),
               new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", DeleteAction: "RESTRICT")])
+            ,new("runtime_workflow_continuation_resume_claims", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
+                ["claim_version"] = BigInt, ["owner_id"] = NullableText,
+                ["lease_expires_at"] = NullableTimestamp, ["completed_at"] = NullableTimestamp
+            }, ["completion_event_id"],
+            [new("ck_runtime_continuation_resume_version", "check (claim_version >= 0)"),
+             new("ck_runtime_continuation_resume_tenant", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_runtime_continuation_resume_state", "check ((owner_id is null and lease_expires_at is null and completed_at is null) or (owner_id is not null and lease_expires_at is not null and completed_at is null) or (owner_id is null and lease_expires_at is null and completed_at is not null))")],
+            [], [new("completion_event_id", "runtime_workflow_continuation_acceptances", "completion_event_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")])
              ,new("organization_scope_generations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
              {
                  ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["generation"] = BigInt, ["updated_at"] = Timestamp
@@ -2024,6 +2043,44 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 foreign key (sink_id, audit_id, body_state)
                 references {schema}.runtime_audit_retention_ledger (sink_id, audit_id, body_state)
                 on delete restrict;
+            """),
+        new RuntimeMigration("V018", "agent_execution_coordination", """
+            create table {schema}.agent_executions (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                root_run_id uuid not null,
+                revision bigint not null,
+                state_json jsonb not null,
+                primary key (tenant_scope_kind, tenant_id, root_run_id),
+                constraint ck_agent_executions_scope check (
+                    (tenant_scope_kind = 'host' and tenant_id = '') or
+                    (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_agent_executions_revision check (revision >= 0)
+            );
+            """),
+        new RuntimeMigration("V019", "workflow_continuation_resume_claims", """
+            create table {schema}.runtime_workflow_continuation_resume_claims (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                completion_event_id text collate "C" not null,
+                claim_version bigint not null default 0,
+                owner_id text,
+                lease_expires_at timestamptz,
+                completed_at timestamptz,
+                primary key (completion_event_id),
+                constraint ck_runtime_continuation_resume_version check (claim_version >= 0),
+                constraint ck_runtime_continuation_resume_tenant check (
+                    (tenant_scope_kind = 'host' and tenant_id = '') or
+                    (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_runtime_continuation_resume_state check (
+                    (owner_id is null and lease_expires_at is null and completed_at is null) or
+                    (owner_id is not null and lease_expires_at is not null and completed_at is null) or
+                    (owner_id is null and lease_expires_at is null and completed_at is not null)),
+                constraint fk_runtime_continuation_resume_acceptance
+                    foreign key (completion_event_id)
+                    references {schema}.runtime_workflow_continuation_acceptances (completion_event_id)
+                    on delete restrict
+            );
             """),
     ];
 }

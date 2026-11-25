@@ -17,4 +17,5 @@ public sealed class WorkflowContinuationRequest
     public string? CompletionEventId { get; init; }
     public string? TriggerOperationId { get; init; }
     public string? TriggerAuditId { get; init; }
+    public WorkflowContinuationResumeLease? ResumeLease { get; init; }
 }

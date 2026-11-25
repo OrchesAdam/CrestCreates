@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Capability.Abstractions;
 using Microsoft.AspNetCore.Http;
@@ -16,6 +17,7 @@ internal static class CapabilityEndpointResultMapper
             CapabilityExecutionStatus.Succeeded => MapSuccess(result.Output, outputMapping),
             CapabilityExecutionStatus.Failed => MapFailure(result),
             CapabilityExecutionStatus.TimedOut => Results.StatusCode(504),
+            CapabilityExecutionStatus.Cancelled => Results.StatusCode(StatusCodes.Status499ClientClosedRequest),
             CapabilityExecutionStatus.Compensated => Results.StatusCode(409),
             _ => Results.StatusCode(500)
         };
@@ -26,8 +28,9 @@ internal static class CapabilityEndpointResultMapper
         return result.Status switch
         {
             CapabilityExecutionStatus.Succeeded => MapSuccessAot(result.Output, outputMapping, httpContext),
-            CapabilityExecutionStatus.Failed => MapFailure(result),
+            CapabilityExecutionStatus.Failed => MapFailure(result, httpContext),
             CapabilityExecutionStatus.TimedOut => Results.StatusCode(504),
+            CapabilityExecutionStatus.Cancelled => Results.StatusCode(StatusCodes.Status499ClientClosedRequest),
             CapabilityExecutionStatus.Compensated => Results.StatusCode(409),
             _ => Results.StatusCode(500)
         };
@@ -77,7 +80,41 @@ internal static class CapabilityEndpointResultMapper
         return Results.Json(output, statusCode: mapping.SuccessStatusCode, contentType: mapping.ContentType);
     }
 
-    private static IResult MapFailure(CapabilityExecutionResult result)
+    private static IResult MapFailure(CapabilityExecutionResult result) =>
+        result.FailureFacts is { } facts
+            ? MapFailureFacts(facts, null)
+            : MapFailureCode(result);
+
+    private static IResult MapFailure(CapabilityExecutionResult result, HttpContext httpContext) =>
+        result.FailureFacts is { } facts
+            ? MapFailureFacts(facts, httpContext)
+            : MapFailureCode(result);
+
+    private static IResult MapFailureFacts(CapabilityFailureFacts facts, HttpContext? httpContext) =>
+        facts.Kind switch
+        {
+            CapabilityFailureKind.InvalidRequest or CapabilityFailureKind.ValidationFailed =>
+                Results.Problem(statusCode: StatusCodes.Status400BadRequest, detail: facts.SafeMessage, extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = facts.ErrorCode
+                }),
+            CapabilityFailureKind.Unauthorized when httpContext?.User.Identity?.IsAuthenticated == true =>
+                Results.StatusCode(StatusCodes.Status403Forbidden),
+            CapabilityFailureKind.Unauthorized => Results.Unauthorized(),
+            CapabilityFailureKind.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+            CapabilityFailureKind.NotFound => Results.NotFound(),
+            CapabilityFailureKind.Conflict => Results.Conflict(),
+            CapabilityFailureKind.PreconditionRequired => Results.StatusCode(StatusCodes.Status428PreconditionRequired),
+            CapabilityFailureKind.Cancelled => Results.StatusCode(StatusCodes.Status499ClientClosedRequest),
+            CapabilityFailureKind.ManagedDeadline => Results.StatusCode(StatusCodes.Status504GatewayTimeout),
+            _ => Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                detail: facts.SafeMessage, extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = facts.ErrorCode
+                })
+        };
+
+    private static IResult MapFailureCode(CapabilityExecutionResult result)
     {
         return result.ErrorCode switch
         {
@@ -92,7 +129,11 @@ internal static class CapabilityEndpointResultMapper
                 Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
              "CAPABILITY_VALIDATION_FAILED" => Results.Problem(statusCode: 400, detail: result.ErrorMessage),
             "RATE_LIMIT_EXCEEDED" => Results.StatusCode(429),
-            _ => Results.Problem(detail: result.ErrorMessage)
+            _ => Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                detail: "服务器内部错误。", extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = result.ErrorCode
+                })
         };
     }
 }

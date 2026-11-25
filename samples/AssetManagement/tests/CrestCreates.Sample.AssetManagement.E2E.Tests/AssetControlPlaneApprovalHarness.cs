@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -33,8 +35,11 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Host;
+using CrestCreates.Sample.AssetManagement.Host.ApprovedReleases;
+using CrestCreates.Sample.AssetManagement.Host.ProductionRelease;
 using CrestCreates.Schema;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -91,13 +96,48 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
     public string TenantId { get; }
     public string AuthorId { get; }
     public IServiceProvider Services => _services;
+    public int ReviewerTaskCreationCount => _services.GetRequiredService<CapturingActivationReviewOrchestrator>().CreatedCount;
 
-    public static async Task<AssetControlPlaneApprovalHarness> CreateAsync(
+    public async Task<AssetProductionEvolutionProposal> ProposeProductionEvolutionAsync(string intent, CancellationToken ct = default)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AssetProductionEvolutionService>()
+            .ProposeAndSubmitAsync(Context(AgentToolName.BuildMetadataContextPack), intent, ct);
+    }
+
+    public async Task<ApprovalSubmission> GetProductionEvolutionApprovalAsync(
+        AssetProductionEvolutionProposal proposal, CancellationToken ct = default)
+    {
+        var request = proposal.ActivationRequest ?? throw new InvalidOperationException("Production evolution has no activation request.");
+        var draft = await _services.GetRequiredService<IDescriptorDraftStore>().GetAsync(TenantId, request.DraftId, ct)
+            ?? throw new InvalidOperationException("Production evolution draft was not persisted.");
+        return await ReadApprovalSubmissionAsync(draft, request, ct);
+    }
+
+    public static Task<AssetControlPlaneApprovalHarness> CreateAsync(
         string tenantId = "asset-approved-host-tenant",
         string authorId = "asset-author-agent",
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        IReadOnlyList<IDescriptor>? additionalBaseline = null) =>
+        CreateCoreAsync(tenantId, authorId, configureServices,
+            additionalBaseline is null ? BuildDeployedBaseline() : [..BuildDeployedBaseline(), ..additionalBaseline]);
+
+    public static Task<AssetControlPlaneApprovalHarness> CreateForProductionEvolutionAsync(
+        string tenantId,
+        Action<IServiceCollection> configureAuthoring,
+        string authorId = "asset-author-agent") =>
+        CreateCoreAsync(tenantId, authorId, services =>
+        {
+            services.AddAssetProductionEvolution();
+            configureAuthoring(services);
+        }, AssetProductionEvolutionBaseline.GetDescriptors());
+
+    private static async Task<AssetControlPlaneApprovalHarness> CreateCoreAsync(
+        string tenantId,
+        string authorId,
+        Action<IServiceCollection>? configureServices,
+        IReadOnlyList<IDescriptor> baseline)
     {
-        var baseline = BuildDeployedBaseline();
         CurrentDescriptorDependencyGraph? currentGraph = null;
         var catalog = new MutableAssetDescriptorCatalog(
             baseline,
@@ -144,9 +184,9 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults);
         services.AddAgentControlPlaneInMemoryStubs();
         services.AddSingleton<DefaultActivationReviewOrchestrator>();
+        services.AddSingleton<CapturingActivationReviewOrchestrator>();
         services.AddSingleton<IActivationReviewOrchestrator>(sp =>
-            new CapturingActivationReviewOrchestrator(
-                sp.GetRequiredService<DefaultActivationReviewOrchestrator>()));
+            sp.GetRequiredService<CapturingActivationReviewOrchestrator>());
         services.AddRuntimeDelivery(options => options.PollingInterval = TimeSpan.FromMilliseconds(10));
         configureServices?.Invoke(services);
 
@@ -274,14 +314,19 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
             }, ct);
         EnsureSuccess(submit, "SubmitActivationRequest");
         var request = submit.Value ?? throw new InvalidOperationException("Activation request was empty.");
-        var orchestrator = _services.GetRequiredService<IActivationReviewOrchestrator>() as CapturingActivationReviewOrchestrator
-            ?? throw new InvalidOperationException("Capturing review orchestrator was not registered.");
-        var taskId = orchestrator.LastTaskId ?? throw new InvalidOperationException("Review task id was empty.");
+        return await ReadApprovalSubmissionAsync(draft, request, ct);
+    }
+
+    private async Task<ApprovalSubmission> ReadApprovalSubmissionAsync(
+        DescriptorDraftModel draft, ActivationRequest request, CancellationToken ct)
+    {
+        var orchestrator = _services.GetRequiredService<CapturingActivationReviewOrchestrator>();
+        var taskId = orchestrator.GetTaskId(request.RequestId) ?? throw new InvalidOperationException("Review task id was empty.");
         var task = await _services.GetRequiredService<IHumanTaskInstanceStore>()
             .GetAsync(new RuntimeInstanceKey(TenantId, taskId), ct)
             ?? throw new InvalidOperationException("Activation review HumanTask was not persisted.");
 
-        return new ApprovalSubmission(draft, request, task, packagePreviewId, evidencePreviewId);
+        return new ApprovalSubmission(draft, request, task, request.BindingSnapshot.PackagePreviewId, request.BindingSnapshot.EvidencePreviewId);
     }
 
     public async Task<ActivationRequest> CompleteHumanAsync(
@@ -377,6 +422,27 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
             capture.Request.Descriptors,
             capture.Package,
             previewId);
+    }
+
+    /// <summary>Issues a release from fresh governance reads; it does not reuse the checked receipt's descriptor objects.</summary>
+    public Task<string> IssueApprovedReleaseAsync(
+        ApprovalSubmission initialTaskSubmission,
+        ApprovalSubmission workflowSubmission,
+        string signingKey,
+        CancellationToken ct = default)
+    {
+        var issuer = new AssetApprovedReleaseIssuer(
+            _services.GetRequiredService<IAgentControlPlaneToolService>(),
+            _artifactResolver,
+            _services.GetRequiredService<IAgentPackageArtifactStore>(),
+            _services.GetRequiredService<IDescriptorPackageSerializer>(),
+            _services.GetRequiredService<IDescriptorDraftStore>(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AssetManagement:ApprovedRelease:SigningKey"] = signingKey
+            }).Build());
+        return issuer.IssueAsync(Context(AgentToolName.GetActivationRequestStatus),
+            initialTaskSubmission.Request.RequestId, workflowSubmission.Request.RequestId, ct);
     }
 
     public async Task AddCheckedDescriptorsToCatalogAsync(
@@ -575,7 +641,11 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
     private sealed class CapturingActivationReviewOrchestrator(
         DefaultActivationReviewOrchestrator inner) : IActivationReviewOrchestrator
     {
-        public string? LastTaskId { get; private set; }
+        private readonly ConcurrentDictionary<string, string> _tasks = new(StringComparer.Ordinal);
+
+        public int CreatedCount => _tasks.Count;
+
+        public string? GetTaskId(string requestId) => _tasks.GetValueOrDefault(requestId);
 
         public async Task<AgentToolResult<string>> CreateActivationReviewTaskAsync(
             AgentToolInvocationContext context,
@@ -584,7 +654,8 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
             CancellationToken ct = default)
         {
             var result = await inner.CreateActivationReviewTaskAsync(context, activationRequest, policy, ct);
-            LastTaskId = result.Value;
+            if (result.Value is { } taskId)
+                _tasks[activationRequest.RequestId] = taskId;
             return result;
         }
 

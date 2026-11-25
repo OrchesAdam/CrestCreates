@@ -14,6 +14,7 @@ namespace CrestCreates.CodeGenerator.Tests.RepositoryGenerator;
 /// not emit a direct SDK repository; the EF control must build and emit the EF repository surface.
 /// </summary>
 [Collection("CrudBuild")]
+[Trait("Category", "MSBuild")]
 public sealed class Issue130ProviderDiagnosticsMsBuildTests
 {
     private static string Root
@@ -133,6 +134,7 @@ public sealed class Issue130ProviderDiagnosticsMsBuildTests
             start.ArgumentList.Add(ProjectFile);
             start.ArgumentList.Add("-p:NuGetAudit=false");
             start.ArgumentList.Add("-p:BuildInParallel=false");
+            start.ArgumentList.Add("-p:UseSharedCompilation=false");
             start.ArgumentList.Add("-m:1");
             start.ArgumentList.Add("--nologo");
             start.ArgumentList.Add("-v:q");

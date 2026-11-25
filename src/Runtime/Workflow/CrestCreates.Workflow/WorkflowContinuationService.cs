@@ -1,5 +1,6 @@
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
@@ -107,8 +108,14 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
                 "Workflow continuation key does not match the waiting Workflow instance.");
         if (request.Result is not null)
             _stateRegistry.Validate(request.Result);
+        if (!Enum.TryParse<CompletionCondition>(request.Outcome, ignoreCase: false, out var humanTaskOutcome)
+            || !Enum.IsDefined(humanTaskOutcome)
+            || !string.Equals(humanTaskOutcome.ToString(), request.Outcome, StringComparison.Ordinal))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                $"Workflow continuation has malformed HumanTask outcome '{request.Outcome}'.");
 
-        var runOperationId = _events.CreateRunOperationId();
+        var runOperationId = request.CompletionEventId!;
         var parent = _contexts.Current;
         using var scope = _contexts.Push(new AuditOperationContext
         {
@@ -136,6 +143,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             StepName = currentStep.Name,
             Status = StepExecutionStatus.Completed,
             Output = request.Result,
+            HumanTaskOutcome = humanTaskOutcome,
             ExecutedAt = DateTimeOffset.UtcNow
         });
 
@@ -254,19 +262,10 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
 
         await _eventPublisher.PublishAsync(resumedEvent, CancellationToken.None).ConfigureAwait(false);
 
-        try
-        {
+        if (acceptance is null)
             await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            // The acceptance is the durable Ack boundary.  Post-resume execution
-            // is intentionally not retried by the completion message, but the
-            // failure must remain observable for operational reconciliation.
-            _logger?.LogError(exception,
-                "Workflow continuation accepted but post-resume execution failed for {WorkflowInstanceId}.",
-                candidate.InstanceId);
-        }
+        else
+            await RunAcceptedContinuationAsync(acceptance, CreateResumeLease(request), ct).ConfigureAwait(false);
     }
 
     private async Task<bool> TryReturnForExistingAcceptanceAsync(
@@ -283,8 +282,64 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             return false;
 
         EnsureAcceptanceMatches(existing, request);
+        await RunAcceptedContinuationAsync(existing, CreateResumeLease(request), cancellationToken).ConfigureAwait(false);
         return true;
     }
+
+    private async Task RunAcceptedContinuationAsync(
+        WorkflowContinuationAcceptance acceptance,
+        WorkflowContinuationResumeLease lease,
+        CancellationToken cancellationToken)
+    {
+        var (result, claim) = await _acceptances!.TryClaimResumeAsync(
+            acceptance, lease, cancellationToken).ConfigureAwait(false);
+        if (result is WorkflowContinuationResumeClaimResult.AlreadyInProgress
+            or WorkflowContinuationResumeClaimResult.NoResumeRequired)
+            return;
+        if (result == WorkflowContinuationResumeClaimResult.AcceptanceMissing || claim is null)
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "The durable continuation acceptance could not claim its exact committed workflow revision.");
+
+        try
+        {
+            var instance = await _store.GetAsync(acceptance.WorkflowKey, cancellationToken).ConfigureAwait(false);
+            if (instance is null)
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "The workflow bound to the durable continuation acceptance no longer exists.");
+            if (instance.Revision < acceptance.WorkflowToRevision)
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "The workflow has not reached the revision committed by its continuation acceptance.");
+            if (instance.Revision > acceptance.WorkflowToRevision
+                || instance.Status != WorkflowInstanceStatus.Running
+                || instance.WaitingHumanTaskKey is not null)
+            {
+                await _acceptances.ReleaseResumeAsync(acceptance, claim, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+
+            await _executionRunner.RunAsync(
+                instance, acceptance.RunOperationId, null, cancellationToken).ConfigureAwait(false);
+            if (!await _acceptances.CompleteResumeAsync(acceptance, claim, cancellationToken).ConfigureAwait(false))
+                throw new RuntimeConcurrencyException("The workflow continuation resume claim was superseded.");
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogError(exception,
+                "Workflow continuation resume failed for {WorkflowInstanceId}; the completion delivery will retry.",
+                acceptance.WorkflowKey.InstanceId);
+            await _acceptances.ReleaseResumeAsync(acceptance, claim, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static WorkflowContinuationResumeLease CreateResumeLease(WorkflowContinuationRequest request)
+        => request.ResumeLease ?? new WorkflowContinuationResumeLease(
+            $"workflow-continuation:{Guid.NewGuid():N}",
+            DateTimeOffset.UtcNow.Ticks,
+            DateTimeOffset.UtcNow.AddMinutes(5));
 
     private static RuntimePersistenceContractException MissingContinuationProof(
         WorkflowContinuationRequest request)

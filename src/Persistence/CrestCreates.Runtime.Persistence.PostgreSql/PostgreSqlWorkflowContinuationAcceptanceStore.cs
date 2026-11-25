@@ -50,6 +50,125 @@ internal sealed class PostgreSqlWorkflowContinuationAcceptanceStore : IWorkflowC
         return WorkflowContinuationAcceptanceWriteResult.Conflict;
     }
 
+    public Task<(WorkflowContinuationResumeClaimResult Result, WorkflowContinuationResumeClaim? Claim)> TryClaimResumeAsync(
+        WorkflowContinuationAcceptance acceptance, WorkflowContinuationResumeLease lease,
+        CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask<(WorkflowContinuationResumeClaimResult, WorkflowContinuationResumeClaim?)>(
+            TryClaimResumeCoreAsync(acceptance, lease, ct)), cancellationToken).AsTask();
+
+    private async Task<(WorkflowContinuationResumeClaimResult Result, WorkflowContinuationResumeClaim? Claim)> TryClaimResumeCoreAsync(
+        WorkflowContinuationAcceptance acceptance, WorkflowContinuationResumeLease lease,
+        CancellationToken cancellationToken)
+    {
+        ValidateLease(lease);
+        var session = _coordinator.RequireSession();
+        long workflowRevision;
+        int workflowStatus;
+        string? waitingTaskId;
+        using (var commandLease = session.EnterCommand())
+        {
+            await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+                $"select revision, status, waiting_instance_id from {PostgreSqlRuntimeStoreSupport.Table(_options, "runtime_workflow_instances")} where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id for update;");
+            PostgreSqlRuntimeStoreSupport.AddKey(command, acceptance.WorkflowKey);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "The workflow bound to the continuation acceptance no longer exists.");
+            workflowRevision = reader.GetInt64(0);
+            workflowStatus = reader.GetInt32(1);
+            waitingTaskId = reader.IsDBNull(2) ? null : reader.GetString(2);
+        }
+
+        string? ownerId;
+        DateTimeOffset? expiresAt;
+        DateTimeOffset? completedAt;
+        long version;
+        using (var commandLease = session.EnterCommand())
+        {
+            await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+                $"select claim_version, owner_id, lease_expires_at, completed_at from {ClaimTable} where tenant_scope_kind=@scope and tenant_id=@tenant and completion_event_id=@event for update;");
+            PostgreSqlRuntimeStoreSupport.AddScope(command, acceptance.TenantScope);
+            command.Parameters.AddWithValue("event", acceptance.CompletionEventId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                version = reader.GetInt64(0);
+                ownerId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                expiresAt = reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2);
+                completedAt = reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3);
+            }
+            else
+            {
+                version = 0;
+                ownerId = null;
+                expiresAt = null;
+                completedAt = null;
+            }
+        }
+
+        if (workflowRevision != acceptance.WorkflowToRevision)
+            return (workflowRevision > acceptance.WorkflowToRevision
+                ? WorkflowContinuationResumeClaimResult.NoResumeRequired
+                : WorkflowContinuationResumeClaimResult.RevisionMismatch, null);
+        if (workflowStatus != (int)WorkflowInstanceStatus.Running || waitingTaskId is not null)
+            return (WorkflowContinuationResumeClaimResult.NoResumeRequired, null);
+        if (completedAt is not null)
+            return (WorkflowContinuationResumeClaimResult.NoResumeRequired, null);
+        if (ownerId is not null && expiresAt > DateTimeOffset.UtcNow)
+            return (WorkflowContinuationResumeClaimResult.AlreadyInProgress, null);
+
+        version++;
+        using (var commandLease = session.EnterCommand())
+        {
+            await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+                $"insert into {ClaimTable} (tenant_scope_kind, tenant_id, completion_event_id, claim_version, owner_id, lease_expires_at) values (@scope, @tenant, @event, @version, @owner, @expires) on conflict (completion_event_id) do update set claim_version=excluded.claim_version, owner_id=excluded.owner_id, lease_expires_at=excluded.lease_expires_at;");
+            PostgreSqlRuntimeStoreSupport.AddScope(command, acceptance.TenantScope);
+            command.Parameters.AddWithValue("event", acceptance.CompletionEventId);
+            command.Parameters.AddWithValue("version", version);
+            command.Parameters.AddWithValue("owner", lease.OwnerId);
+            command.Parameters.AddWithValue("expires", lease.ExpiresAt);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+                throw new RuntimeConcurrencyException("Workflow continuation resume claim changed concurrently.");
+        }
+        return (WorkflowContinuationResumeClaimResult.Acquired, new WorkflowContinuationResumeClaim(version));
+    }
+
+    public Task<bool> CompleteResumeAsync(WorkflowContinuationAcceptance acceptance,
+        WorkflowContinuationResumeClaim claim, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask<bool>(
+            UpdateResumeCoreAsync(acceptance, claim, completed: true, ct)), cancellationToken).AsTask();
+
+    public Task<bool> ReleaseResumeAsync(WorkflowContinuationAcceptance acceptance,
+        WorkflowContinuationResumeClaim claim, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask<bool>(
+            UpdateResumeCoreAsync(acceptance, claim, completed: false, ct)), cancellationToken).AsTask();
+
+    private async Task<bool> UpdateResumeCoreAsync(WorkflowContinuationAcceptance acceptance,
+        WorkflowContinuationResumeClaim claim, bool completed, CancellationToken cancellationToken)
+    {
+        var session = _coordinator.RequireSession();
+        using var commandLease = session.EnterCommand();
+        await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+            completed
+                ? $"update {ClaimTable} set owner_id=null, lease_expires_at=null, completed_at=clock_timestamp() where tenant_scope_kind=@scope and tenant_id=@tenant and completion_event_id=@event and claim_version=@version and completed_at is null;"
+                : $"update {ClaimTable} set owner_id=null, lease_expires_at=null where tenant_scope_kind=@scope and tenant_id=@tenant and completion_event_id=@event and claim_version=@version and completed_at is null;");
+        PostgreSqlRuntimeStoreSupport.AddScope(command, acceptance.TenantScope);
+        command.Parameters.AddWithValue("event", acceptance.CompletionEventId);
+        command.Parameters.AddWithValue("version", claim.Version);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+    }
+
+    private static void ValidateLease(WorkflowContinuationResumeLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentException.ThrowIfNullOrWhiteSpace(lease.OwnerId);
+        if (lease.FencingToken <= 0 || lease.ExpiresAt <= DateTimeOffset.UtcNow)
+            throw new ArgumentOutOfRangeException(nameof(lease));
+    }
+
+    private string ClaimTable => PostgreSqlRuntimeStoreSupport.Table(_options, "runtime_workflow_continuation_resume_claims");
+
     private static DateTimeOffset TruncateToPostgreSqlPrecision(DateTimeOffset value)
         => value.AddTicks(-(value.Ticks % 10));
 

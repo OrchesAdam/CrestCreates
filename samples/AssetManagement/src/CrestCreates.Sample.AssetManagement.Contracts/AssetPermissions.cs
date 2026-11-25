@@ -15,5 +15,6 @@ public static class AssetPermissions
         public const string Transfer = GroupName + ".Assets.Transfer";
         public const string RequestMaintenance = GroupName + ".Assets.RequestMaintenance";
         public const string CompleteMaintenance = GroupName + ".Assets.CompleteMaintenance";
+        public const string ReleaseProduction = GroupName + ".Assets.ReleaseProduction";
     }
 }

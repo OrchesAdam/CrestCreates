@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Orchestration;
 using CrestCreates.Agent.Tools;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
@@ -40,6 +41,8 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(AgentToolGovernancePreDispatchRecord))]
 [JsonSerializable(typeof(AgentToolBudgetRequirement))]
 [JsonSerializable(typeof(AgentExecutionContext))]
+[JsonSerializable(typeof(AgentExecutionSnapshot))]
+[JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(AgentToolInvocationAbandonedReceipt))]
 [JsonSerializable(typeof(AgentToolInvocationPrepareCompletionRequest))]
 [JsonSerializable(typeof(AgentToolInvocationPrepareReleaseRequest))]
