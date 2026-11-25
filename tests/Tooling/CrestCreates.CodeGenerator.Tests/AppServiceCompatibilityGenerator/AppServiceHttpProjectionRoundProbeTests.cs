@@ -20,6 +20,7 @@ namespace CrestCreates.CodeGenerator.Tests.AppServiceCompatibilityGenerator;
 /// API, so the red cause cannot be "an assertion about the future".
 /// </summary>
 [Collection("CrudBuild")]
+[Trait("Category", "MSBuild")]
 public sealed class AppServiceHttpProjectionRoundProbeTests
 {
     private const string GeneratorFolderFragment = "CrestCreates.CodeGenerator";
@@ -130,7 +131,7 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
 
         var (exitCode, output) = await RunDotnetAsync(
             repoRoot,
-            $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo",
+            $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false -p:UseSharedCompilation=false --nologo",
             TimeSpan.FromMinutes(20));
 
         return new ProbeRun(exitCode, output, probeDirectory);
@@ -195,6 +196,7 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
             UseShellExecute = false,
         };
         startInfo.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
+        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
 
         using var process = Process.Start(startInfo)!;
         var output = new StringBuilder();

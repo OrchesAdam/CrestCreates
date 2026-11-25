@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -96,6 +99,47 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
             "System.ComponentModel",
             "System.ComponentModel.Annotations"
         };
+
+        private const int CompilationCacheCapacity = 64;
+        private static readonly object CompilationCacheSync = new();
+        private static readonly Dictionary<CompilationKey, CSharpCompilation> CompilationCache = new(new CompilationKeyComparer());
+        private static readonly Queue<CompilationKey> CompilationCacheOrder = new();
+        private static readonly ConcurrentDictionary<string, MetadataReference> MetadataReferenceCache = new(StringComparer.Ordinal);
+        private static readonly ConditionalWeakTable<MetadataReference, ReferenceIdentity> ReferenceIdentities = new();
+        private static int s_nextReferenceId;
+
+        private sealed record CompilationKey(
+            string AssemblyName,
+            ImmutableArray<string> Sources,
+            ImmutableArray<string> AdditionalSources,
+            ImmutableArray<int> ReferenceIds);
+
+        private sealed class CompilationKeyComparer : IEqualityComparer<CompilationKey>
+        {
+            public bool Equals(CompilationKey? left, CompilationKey? right)
+            {
+                if (left is null || right is null) return ReferenceEquals(left, right);
+                return left.AssemblyName == right.AssemblyName
+                    && left.Sources.SequenceEqual(right.Sources)
+                    && left.AdditionalSources.SequenceEqual(right.AdditionalSources)
+                    && left.ReferenceIds.SequenceEqual(right.ReferenceIds);
+            }
+
+            public int GetHashCode(CompilationKey key)
+            {
+                var hash = new HashCode();
+                hash.Add(key.AssemblyName, StringComparer.Ordinal);
+                foreach (var source in key.Sources) hash.Add(source, StringComparer.Ordinal);
+                foreach (var source in key.AdditionalSources) hash.Add(source, StringComparer.Ordinal);
+                foreach (var referenceId in key.ReferenceIds) hash.Add(referenceId);
+                return hash.ToHashCode();
+            }
+        }
+
+        private sealed class ReferenceIdentity
+        {
+            public int Id { get; } = Interlocked.Increment(ref s_nextReferenceId);
+        }
 
         /// <summary>
         /// 缺失的测试特性源代码（从 Domain.Shared 中移除）
@@ -289,9 +333,10 @@ namespace CrestCreates.Domain.Shared.Attributes
             string assemblyName,
             string[] sources,
             IEnumerable<MetadataReference>? additionalMetadataReferences = null,
-            string[]? additionalReferences = null)
+            string[]? additionalReferences = null,
+            string[]? additionalSources = null)
             => (Microsoft.CodeAnalysis.CSharp.CSharpCompilation)CreateCompilation(
-                assemblyName, sources, additionalSources: null, additionalReferences, additionalMetadataReferences);
+                assemblyName, sources, additionalSources, additionalReferences, additionalMetadataReferences);
 
         /// <summary>
         /// 将一个程序集编译为 PE 镜像字节（不运行任何生成器），供跨程序集测试作为 MetadataReference 引用。
@@ -352,7 +397,7 @@ namespace CrestCreates.Domain.Shared.Attributes
                 try
                 {
                     var assembly = System.Reflection.Assembly.Load(defaultReferenceName);
-                    references.Add(MetadataReference.CreateFromFile(assembly.Location));
+                    references.Add(GetMetadataReference(assembly.Location));
                 }
                 catch
                 {
@@ -361,7 +406,7 @@ namespace CrestCreates.Domain.Shared.Attributes
             }
 
             // 添加当前程序集的引用
-            references.Add(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+            references.Add(GetMetadataReference(typeof(object).Assembly.Location));
 
             // 添加额外引用
             if (additionalReferences != null)
@@ -371,7 +416,7 @@ namespace CrestCreates.Domain.Shared.Attributes
                     try
                     {
                         var assembly = System.Reflection.Assembly.Load(refName);
-                        references.Add(MetadataReference.CreateFromFile(assembly.Location));
+                        references.Add(GetMetadataReference(assembly.Location));
                     }
                     catch
                     {
@@ -384,7 +429,7 @@ namespace CrestCreates.Domain.Shared.Attributes
             try
             {
                 var domainSharedAssembly = System.Reflection.Assembly.Load("CrestCreates.Domain.Shared");
-                references.Add(MetadataReference.CreateFromFile(domainSharedAssembly.Location));
+                references.Add(GetMetadataReference(domainSharedAssembly.Location));
             }
             catch
             {
@@ -392,7 +437,7 @@ namespace CrestCreates.Domain.Shared.Attributes
                 try
                 {
                     var domainSharedType = typeof(CrestCreates.Domain.Shared.Attributes.EntityAttribute);
-                    references.Add(MetadataReference.CreateFromFile(domainSharedType.Assembly.Location));
+                    references.Add(GetMetadataReference(domainSharedType.Assembly.Location));
                 }
                 catch
                 {
@@ -421,35 +466,46 @@ namespace CrestCreates.Domain.Shared.Attributes
                 references.AddRange(additionalMetadataReferences);
             }
 
-            // 创建语法树
-            var syntaxTrees = new List<SyntaxTree>();
-
-            // 包含缺失的测试特性源代码
-            syntaxTrees.Add(CSharpSyntaxTree.ParseText(TestAttributesSource));
-
-            foreach (var source in sources)
-            {
-                syntaxTrees.Add(CSharpSyntaxTree.ParseText(source));
-            }
-
-            if (additionalSources != null)
-            {
-                foreach (var source in additionalSources)
-                {
-                    syntaxTrees.Add(CSharpSyntaxTree.ParseText(source));
-                }
-            }
-
-            // 创建编译
-            var compilation = CSharpCompilation.Create(
+            var key = new CompilationKey(
                 assemblyName,
-                syntaxTrees,
-                references,
-                new CSharpCompilationOptions(
-                    OutputKind.DynamicallyLinkedLibrary,
-                    nullableContextOptions: NullableContextOptions.Enable));
+                sources.ToImmutableArray(),
+                (additionalSources ?? Array.Empty<string>()).ToImmutableArray(),
+                references.Select(GetReferenceId).ToImmutableArray());
 
-            return compilation;
+            lock (CompilationCacheSync)
+            {
+                if (CompilationCache.TryGetValue(key, out var cached))
+                {
+                    return cached;
+                }
+
+                var syntaxTrees = new List<SyntaxTree>
+                {
+                    CSharpSyntaxTree.ParseText(TestAttributesSource)
+                };
+                syntaxTrees.AddRange(sources.Select(source => CSharpSyntaxTree.ParseText(source)));
+                if (additionalSources is not null)
+                {
+                    syntaxTrees.AddRange(additionalSources.Select(source => CSharpSyntaxTree.ParseText(source)));
+                }
+
+                var compilation = CSharpCompilation.Create(
+                    assemblyName,
+                    syntaxTrees,
+                    references,
+                    new CSharpCompilationOptions(
+                        OutputKind.DynamicallyLinkedLibrary,
+                        nullableContextOptions: NullableContextOptions.Enable));
+
+                if (CompilationCacheOrder.Count == CompilationCacheCapacity)
+                {
+                    CompilationCache.Remove(CompilationCacheOrder.Dequeue());
+                }
+
+                CompilationCache.Add(key, compilation);
+                CompilationCacheOrder.Enqueue(key);
+                return compilation;
+            }
         }
 
         /// <summary>
@@ -460,12 +516,18 @@ namespace CrestCreates.Domain.Shared.Attributes
             return filePath.Contains("Microsoft.NET");
         }
 
+        private static MetadataReference GetMetadataReference(string path) =>
+            MetadataReferenceCache.GetOrAdd(path, static file => MetadataReference.CreateFromFile(file));
+
+        private static int GetReferenceId(MetadataReference reference) =>
+            ReferenceIdentities.GetValue(reference, static _ => new ReferenceIdentity()).Id;
+
         private static void TryAddReference(List<MetadataReference> references, string assemblyName)
         {
             try
             {
                 var assembly = System.Reflection.Assembly.Load(assemblyName);
-                references.Add(MetadataReference.CreateFromFile(assembly.Location));
+                references.Add(GetMetadataReference(assembly.Location));
             }
             catch
             {
@@ -482,7 +544,7 @@ namespace CrestCreates.Domain.Shared.Attributes
             try
             {
                 var assembly = System.Reflection.Assembly.Load("Microsoft.AspNetCore");
-                references.Add(MetadataReference.CreateFromFile(assembly.Location));
+                references.Add(GetMetadataReference(assembly.Location));
             }
             catch
             {
@@ -500,7 +562,7 @@ namespace CrestCreates.Domain.Shared.Attributes
                             var dllPath = System.IO.Path.Combine(latestRef, "ref", "net10.0", "Microsoft.AspNetCore.dll");
                             if (System.IO.File.Exists(dllPath))
                             {
-                                references.Add(MetadataReference.CreateFromFile(dllPath));
+                                references.Add(GetMetadataReference(dllPath));
                             }
                         }
                     }

@@ -20,6 +20,7 @@ namespace CrestCreates.CodeGenerator.Tests.AppServiceCompatibilityGenerator;
 /// never reuses a stale success stamp.
 /// </summary>
 [Collection("CrudBuild")]
+[Trait("Category", "MSBuild")]
 public sealed class Issue129AppServiceHttpMsBuildTests
 {
     private const string ProjectTemplate = """
@@ -905,13 +906,23 @@ public sealed class Issue129AppServiceHttpMsBuildTests
         {
             var args = new List<string> { "build", Path.Combine(directory, "Probe.csproj") };
             args.AddRange(options);
+            if (HasRestoreAssets(directory) && !options.Any(option => option is "-r" or "--runtime" or "--force"))
+            {
+                args.Add("--no-restore");
+            }
             return await RunDotnetAsync(directory, args, TimeSpan.FromMinutes(12));
         }
 
+        private static bool HasRestoreAssets(string directory) =>
+            File.Exists(Path.Combine(directory, "obj", "project.assets.json"));
+
         public static async Task<(int ExitCode, string Output)> DesignTimeAsync(string directory)
         {
-            (await RunDotnetAsync(directory, ["restore", Path.Combine(directory, "Probe.csproj")], TimeSpan.FromMinutes(5)))
-                .ExitCode.Should().Be(0);
+            if (!HasRestoreAssets(directory))
+            {
+                (await RunDotnetAsync(directory, ["restore", Path.Combine(directory, "Probe.csproj")], TimeSpan.FromMinutes(5)))
+                    .ExitCode.Should().Be(0);
+            }
             return await RunDotnetAsync(directory,
             [
                 "msbuild", Path.Combine(directory, "Probe.csproj"), "-t:Compile",
@@ -949,6 +960,7 @@ public sealed class Issue129AppServiceHttpMsBuildTests
             }
 
             process.StartInfo.ArgumentList.Add("-p:NuGetAudit=false");
+            process.StartInfo.ArgumentList.Add("-p:UseSharedCompilation=false");
             process.StartInfo.ArgumentList.Add("--nologo");
             process.StartInfo.ArgumentList.Add("-v:q");
             process.StartInfo.RedirectStandardOutput = true;

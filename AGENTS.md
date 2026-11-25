@@ -149,6 +149,10 @@ dotnet test tests/Framework/Ddd/CrestCreates.Domain.Tests
 dotnet test --filter "FullyQualifiedName~CrestCreates.Application.Tests.Tenants.TenantAppServiceTests"
 dotnet test --filter "FullyQualifiedName~SomeTestClass.SomeTestMethod"
 
+# CodeGenerator 快速内循环：排除真实 MSBuild 消费方构建；完整验收仍运行不带过滤的套件
+dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --no-build --filter "Category!=MSBuild"
+dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --no-build --filter "Category=MSBuild"
+
 # 运行示例应用
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web
 dotnet run --project samples/SaaSHelpdesk/SaaSHelpdesk.Web
