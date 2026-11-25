@@ -28,6 +28,7 @@ internal sealed class TenantIdentityAnalysis
     public int NameSourceReadsAtExits { get; set; }
     public List<string> CompilationErrors { get; } = [];
     public int IndexedHelperMembers { get; set; }
+    public int PeakCachedProjectContexts { get; set; }
 
     public IEnumerable<TenantIdentityDiagnostic> Violations =>
         Diagnostics.Where(diagnostic => diagnostic.Rule != TenantIdentityRule.TI900);
@@ -94,12 +95,16 @@ internal sealed class TenantIdentityAnalyzer
             }
 
             _analysis.CompiledProjects.Add(input.Project);
+            // Retaining every Roslyn closure exhausts the CI runner; helper lookups may rebuild on demand.
+            _contexts.Clear();
             var context = Context(input);
             foreach (var source in input.Sources.Where(HasSensitiveCandidate))
             {
                 _analysis.FilesWithSensitiveCandidates++;
                 AnalyzeFile(input, source.RelativePath, context);
             }
+
+            _contexts.Clear();
         }
     }
 
@@ -156,6 +161,13 @@ internal sealed class TenantIdentityAnalyzer
             {
                 _analysis.CompilationErrors.Add($"{input.Project}: {error.Id} {error.GetMessage()} [{error.Location.GetLineSpan().Path}]");
             }
+
+            foreach (var cachedProject in _contexts.Keys.Where(key => key != input.Project).Take(_contexts.Count - 2).ToArray())
+            {
+                _contexts.Remove(cachedProject);
+            }
+
+            _analysis.PeakCachedProjectContexts = Math.Max(_analysis.PeakCachedProjectContexts, _contexts.Count);
         }
 
         return context;

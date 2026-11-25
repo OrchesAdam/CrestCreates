@@ -1,4 +1,11 @@
-# CrestCreates platform status — 2026-11-24
+# CrestCreates platform status — 2026-11-25
+
+## 2026-11-25 — PR #194 Boundary CI 内存终止修复（未合并）
+
+- **失败定位**：远端 CI run `45520522296` 的 `Test — Dependency Boundaries` 在约 174 秒后以 exit 143 终止，日志无断言失败。本地复现旧实现时 testhost RSS 超过 24 GB；根因是租户身份守卫为每个项目重复装载相同程序集元数据，并常驻全部 Roslyn compilation context。
+- **修复**：`TenantIdentityProjectInventory` 按完整程序集路径共享 `MetadataReference`；`TenantIdentityAnalyzer` 在项目间释放编译上下文，并把跨项目 helper 查询缓存限制为最多 2 个上下文。新增两条确定性回归：重复项目加载必须复用同一 metadata reference 实例；全仓扫描峰值缓存上下文数不得超过 2。没有放宽 TenantId 规则或覆盖范围。
+- **串行证据（~/.dotnet 10.0.114 + 一次性 PG16）**：单次全仓租户扫描 **1/1**，最大 RSS **891856 KB**，仍枚举 152 个项目 / 2827 文件 / 104 个编译项目 / 1415 个身份出口，0 诊断；完整 Boundary **284/284**，证据闭包 **14/14**；根解决方案 build **0 error / 37 个既有 trimming warning**。一次性容器与卷已删除，未启停共享服务。
+- **状态**：修复随 PR #194 分支 `feat/agent-modes-business-evolution` 推送，使用后台 watcher 跟踪完整 CI；未合并。支持声明与生产代码均未变化。
 
 ## 2026-11-24 — PR #194 审查修复（已提交/推送，本地 CI 全绿，未合并）
 

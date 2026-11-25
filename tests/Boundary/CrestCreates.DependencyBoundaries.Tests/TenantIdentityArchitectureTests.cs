@@ -277,6 +277,23 @@ public class TenantIdentityArchitectureTests
     }
 
     [Fact]
+    public void TI_C01r_ProjectLoads_ShareMetadataReferenceInstances()
+    {
+        var root = FindRepositoryRoot();
+        var projectFile = Path.Combine(root, "src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj");
+        var first = TenantIdentityProjectInventory.Load(root, projectFile);
+        var second = TenantIdentityProjectInventory.Load(root, projectFile);
+        var secondByDisplay = second.References.ToDictionary(reference => reference.Display, StringComparer.Ordinal);
+
+        Assert.NotEmpty(first.References);
+        foreach (var reference in first.References)
+        {
+            Assert.True(secondByDisplay.TryGetValue(reference.Display, out var shared));
+            Assert.Same(shared, reference);
+        }
+    }
+
+    [Fact]
     public void TI_C01c_UnboundSensitivePort_FailsClosedInsteadOfReportingClean()
     {
         const string sample = """
@@ -326,6 +343,8 @@ public class TenantIdentityArchitectureTests
         Assert.True(analysis.CompiledProjects.Count > 50, "the gate must compile real projects, not run empty");
         Assert.True(analysis.IndexedHelperMembers > 500, "first-party helpers must be indexed for summaries");
         Assert.True(analysis.Exits.Count > 500, "identity exits must be observed across the repository");
+        Assert.True(analysis.PeakCachedProjectContexts <= 2,
+            $"Roslyn project contexts must be released between projects; peak was {analysis.PeakCachedProjectContexts}");
 
         var builder = new StringBuilder();
         builder.AppendLine($"projects enumerated    : {analysis.ProjectsEnumerated}");
@@ -333,6 +352,7 @@ public class TenantIdentityArchitectureTests
         builder.AppendLine($"candidate files        : {analysis.FilesWithSensitiveCandidates}");
         builder.AppendLine($"compiled projects      : {analysis.CompiledProjects.Count}");
         builder.AppendLine($"indexed helper members : {analysis.IndexedHelperMembers}");
+        builder.AppendLine($"peak cached contexts  : {analysis.PeakCachedProjectContexts}");
         builder.AppendLine($"identity exit sites    : {analysis.Exits.Count}");
         builder.AppendLine($"diagnostics            : {analysis.Diagnostics.Count}");
         foreach (var group in analysis.Exits.GroupBy(exit => exit.PortLabel).OrderByDescending(group => group.Count()))
