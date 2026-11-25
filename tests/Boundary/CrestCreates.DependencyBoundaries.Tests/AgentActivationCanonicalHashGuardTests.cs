@@ -8,15 +8,15 @@ public class AgentActivationCanonicalHashGuardTests
     public void ControlPlane_DoesNotContain_AdHoc_Hash_Computation()
     {
         var root = FindRepositoryRoot();
-        var controlPlaneDir = Path.Combine(root, "src", "Runtime", "Agent", "CrestCreates.Agent.ControlPlane");
-
-        if (!Directory.Exists(controlPlaneDir))
+        var contractDirectories = new[]
         {
-            // Skip if directory doesn't exist in this checkout
-            return;
-        }
+            Path.Combine(root, "src", "Runtime", "Agent", "CrestCreates.Agent.ControlPlane"),
+            Path.Combine(root, "src", "Runtime", "Agent", "CrestCreates.Agent.ControlPlane.Activation.Abstractions")
+        };
 
-        var csFiles = Directory.GetFiles(controlPlaneDir, "*.cs", SearchOption.AllDirectories)
+        var csFiles = contractDirectories
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories))
             .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
             .ToList();
 

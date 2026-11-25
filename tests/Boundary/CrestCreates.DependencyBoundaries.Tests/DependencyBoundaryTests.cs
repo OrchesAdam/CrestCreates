@@ -101,7 +101,11 @@ public class DependencyBoundaryTests
         AssertNoDirectProjectReferences(
             "src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions",
             "Agent Memory abstractions must remain runtime-context contracts and must not depend on ControlPlane contracts.",
-            new[] { "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions" });
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions"
+            });
     }
 
     [Fact]
@@ -215,6 +219,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Framework/Api",
                 "src/Framework/Web",
                 "src/Platform",
@@ -233,6 +238,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
                 "src/Framework/Api",
@@ -257,6 +263,25 @@ public class DependencyBoundaryTests
                 "src/Runtime/HumanTask/CrestCreates.HumanTask/",
                 "src/Runtime/Agent/CrestCreates.Agent.Runtime/",
                 "src/Runtime/Capability/CrestCreates.Capability/",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
+            });
+    }
+
+    [Fact]
+    public void ControlPlaneActivationAbstractions_DoesNotReferenceFrameworkWebOrConcreteRuntime()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
+            "Activation abstractions may reference root ControlPlane contracts but must not reference Framework, Web, concrete ControlPlane, or concrete DescriptorDraft.",
+            new[]
+            {
+                "src/Framework",
+                "src/Platform",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane/",
+                "src/Metadata/Draft/CrestCreates.DescriptorDraft/",
+                "src/Runtime/HumanTask/CrestCreates.HumanTask/",
+                "src/Runtime/Workflow/CrestCreates.Workflow/",
+                "src/Persistence"
             });
     }
 
@@ -270,6 +295,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http"
             });
@@ -285,6 +311,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
                 "src/Platform"
@@ -301,6 +328,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Platform"
             });
@@ -316,6 +344,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
                 "src/Platform"
@@ -341,6 +370,7 @@ public class DependencyBoundaryTests
             {
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
                 "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions",
                 "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
                 "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
                 "src/Platform"

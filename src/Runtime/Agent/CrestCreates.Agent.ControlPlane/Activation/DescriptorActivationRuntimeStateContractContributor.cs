@@ -15,11 +15,11 @@ public sealed class DescriptorActivationRuntimeStateContractContributor : IRunti
             DescriptorActivationRuntimeStateJsonSerializerContext.Default.DescriptorActivationReviewTaskInput,
             taskInputRoots);
 
-        var decisionRoots = CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneToolJsonSerializerContext
-            .AgentControlPlaneToolJsonSerializerContextRootManifest.AllDirectRootTypes;
+        var decisionRoots = CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneActivationJsonSerializerContext
+            .AgentControlPlaneActivationJsonSerializerContextRootManifest.AllDirectRootTypes;
         builder.Add(
             "crest.agent-control-plane/descriptor-activation-review-decision/v1",
-            CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneToolJsonSerializerContext.Default.DescriptorActivationReviewDecision,
+            CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneActivationJsonSerializerContext.Default.DescriptorActivationReviewDecision,
             decisionRoots);
     }
 }

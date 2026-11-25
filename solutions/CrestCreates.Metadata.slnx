@@ -43,6 +43,7 @@
   </Folder>
   <Folder Name="/src/Runtime/Agent/">
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions/CrestCreates.Agent.ControlPlane.Activation.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
   </Folder>
   <Folder Name="/tests/Boundary/">

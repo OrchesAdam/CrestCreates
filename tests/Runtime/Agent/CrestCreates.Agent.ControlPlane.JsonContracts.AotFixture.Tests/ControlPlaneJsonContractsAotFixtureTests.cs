@@ -21,6 +21,9 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
     private static readonly string[] ScenarioSentinels =
     [
         "ReflectionFallback_IsDisabled",
+        "RootContext_RepresentativeRoots",
+        "ActivationContext_RepresentativeRoots",
+        "RootContext_ActivationRejected",
         "AgentDraftIdentityBinding",
         "ReviewHashInputSourceGeneratedRoundTrip",
         "AgentAuthoringOptionalReferences",

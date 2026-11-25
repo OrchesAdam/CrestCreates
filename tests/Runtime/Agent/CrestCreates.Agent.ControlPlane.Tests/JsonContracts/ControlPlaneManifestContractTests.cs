@@ -14,38 +14,55 @@ namespace CrestCreates.Agent.ControlPlane.Tests.JsonContracts;
 
 public class ControlPlaneManifestContractTests
 {
-    private static readonly Type ContextType = typeof(AgentControlPlaneToolJsonSerializerContext);
-    private static readonly Type ManifestType = ContextType.GetNestedType("AgentControlPlaneToolJsonSerializerContextRootManifest", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+    private const string ToolContextName = "Tool";
+    private const string ActivationContextName = "Activation";
 
-    private static IReadOnlySet<Type> GetSurfaceRootTypes()
+    public static TheoryData<string> ContextNames => new()
     {
-        var prop = ManifestType.GetProperty("SurfaceRootTypes", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
-        return (IReadOnlySet<Type>)prop.GetValue(null)!;
+        ToolContextName,
+        ActivationContextName
+    };
+
+    private static Type GetContextType(string contextName)
+    {
+        return contextName switch
+        {
+            ToolContextName => typeof(AgentControlPlaneToolJsonSerializerContext),
+            ActivationContextName => typeof(AgentControlPlaneActivationJsonSerializerContext),
+            _ => throw new ArgumentOutOfRangeException(nameof(contextName))
+        };
     }
 
-    private static IReadOnlySet<Type> GetExplicitRootTypes()
+    private static Type GetManifestType(string contextName)
     {
-        var prop = ManifestType.GetProperty("ExplicitRootTypes", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
-        return (IReadOnlySet<Type>)prop.GetValue(null)!;
+        var contextType = GetContextType(contextName);
+        var manifestType = contextType.GetNestedType(
+            $"{contextType.Name}RootManifest",
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        manifestType.Should().NotBeNull("generated root manifest must exist");
+        return manifestType!;
     }
 
-    private static IReadOnlySet<Type> GetAllDirectRootTypes()
+    private static IReadOnlySet<Type> GetRootTypes(string contextName, string propertyName)
     {
-        var prop = ManifestType.GetProperty("AllDirectRootTypes", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
-        return (IReadOnlySet<Type>)prop.GetValue(null)!;
+        var prop = GetManifestType(contextName).GetProperty(
+            propertyName,
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        prop.Should().NotBeNull($"manifest must have {propertyName} property");
+        return (IReadOnlySet<Type>)prop!.GetValue(null)!;
     }
 
-    private static HashSet<Type> GetJsonSerializableTypes()
+    private static HashSet<Type> GetJsonSerializableTypes(string contextName)
     {
-        return ContextType.GetCustomAttributesData()
+        return GetContextType(contextName).GetCustomAttributesData()
             .Where(d => d.AttributeType == typeof(JsonSerializableAttribute))
             .Select(d => (Type)d.ConstructorArguments[0].Value!)
             .ToHashSet();
     }
 
-    private static HashSet<Type> GetJsonTypeInfoTypes()
+    private static HashSet<Type> GetJsonTypeInfoTypes(string contextName)
     {
-        return ContextType
+        return GetContextType(contextName)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(p => p.PropertyType.IsGenericType
                         && p.PropertyType.GetGenericTypeDefinition() == typeof(JsonTypeInfo<>))
@@ -53,53 +70,64 @@ public class ControlPlaneManifestContractTests
             .ToHashSet();
     }
 
-    [Fact]
-    public void GeneratedSurfaceRoots_MatchExpectedToolAndManifestSurfaces()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void GeneratedSurfaceRoots_MatchExpectedToolAndManifestSurfaces(string contextName)
     {
-        var surfaceRoots = GetSurfaceRootTypes();
+        var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
 
         surfaceRoots.Should().Contain(typeof(AgentToolDescriptor), "ListAgentTools returns IReadOnlyList<AgentToolDescriptor>");
         surfaceRoots.Should().Contain(typeof(AgentToolResult<string>), "GetAgentToolDescriptor returns string tool name");
         surfaceRoots.Should().Contain(typeof(DescriptorRef), "GetAgentToolDescriptor takes DescriptorRef parameter");
         surfaceRoots.Should().Contain(typeof(ApplyFixProposalRequest), "ApplyFixProposal takes ApplyFixProposalRequest");
-        surfaceRoots.Should().Contain(typeof(SubmitActivationRequestRequest), "SubmitActivationRequest takes SubmitActivationRequestRequest");
         surfaceRoots.Should().Contain(typeof(DescriptorSearchRequest), "SearchDescriptors takes DescriptorSearchRequest");
         surfaceRoots.Should().Contain(typeof(ExplainDiagnosticsRequest), "ExplainDiagnostics takes ExplainDiagnosticsRequest");
         surfaceRoots.Should().Contain(typeof(CreateDescriptorDraftRequest), "CreateDescriptorDraft takes CreateDescriptorDraftRequest");
         surfaceRoots.Should().Contain(typeof(UpdateDescriptorDraftRequest), "UpdateDescriptorDraft takes UpdateDescriptorDraftRequest");
+
+        if (contextName == ActivationContextName)
+        {
+            surfaceRoots.Should().Contain(typeof(SubmitActivationRequestRequest));
+            surfaceRoots.Should().Contain(typeof(AgentToolResult<ActivationRequest>));
+            surfaceRoots.Should().Contain(typeof(AgentToolResult<ActivationReadinessPreview>));
+        }
+        else
+        {
+            surfaceRoots.Should().NotContain(typeof(SubmitActivationRequestRequest));
+            surfaceRoots.Should().NotContain(typeof(AgentToolResult<ActivationRequest>));
+            surfaceRoots.Should().NotContain(typeof(AgentToolResult<ActivationReadinessPreview>));
+        }
     }
 
-    [Fact]
-    public void GeneratedSurfaceRoots_AreResolvedByContext()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void GeneratedSurfaceRoots_AreResolvedByContext(string contextName)
     {
-        var surfaceRoots = GetSurfaceRootTypes();
-        var jsonTypeInfoTypes = GetJsonTypeInfoTypes();
+        var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
+        var jsonTypeInfoTypes = GetJsonTypeInfoTypes(contextName);
 
-        var unresolved = surfaceRoots.Except(jsonTypeInfoTypes).ToList();
-        unresolved.Should().BeEmpty(
-            "all surface root types must have corresponding JsonTypeInfo<T> properties. " +
-            "Unresolved: {0}", string.Join(", ", unresolved.Select(t => t.FullName)));
+        surfaceRoots.Except(jsonTypeInfoTypes).Should().BeEmpty(
+            "all surface root types must have corresponding JsonTypeInfo<T> properties");
     }
 
-    [Fact]
-    public void ExplicitExtras_AreResolvedByContext()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void ExplicitExtras_AreResolvedByContext(string contextName)
     {
-        var explicitRoots = GetExplicitRootTypes();
-        var jsonTypeInfoTypes = GetJsonTypeInfoTypes();
+        var explicitRoots = GetRootTypes(contextName, "ExplicitRootTypes");
+        var jsonTypeInfoTypes = GetJsonTypeInfoTypes(contextName);
 
-        var unresolved = explicitRoots.Except(jsonTypeInfoTypes).ToList();
-        unresolved.Should().BeEmpty(
-            "all explicit extra root types must have corresponding JsonTypeInfo<T> properties. " +
-            "Unresolved: {0}", string.Join(", ", unresolved.Select(t => t.FullName)));
+        explicitRoots.Except(jsonTypeInfoTypes).Should().BeEmpty(
+            "all explicit extra root types must have corresponding JsonTypeInfo<T> properties");
     }
 
-    [Fact]
-    public void AllDirectRoots_EqualSurfaceUnionExplicit()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void AllDirectRoots_EqualSurfaceUnionExplicit(string contextName)
     {
-        var surfaceRoots = GetSurfaceRootTypes();
-        var explicitRoots = GetExplicitRootTypes();
-        var allDirectRoots = GetAllDirectRootTypes();
-
+        var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
+        var explicitRoots = GetRootTypes(contextName, "ExplicitRootTypes");
+        var allDirectRoots = GetRootTypes(contextName, "AllDirectRootTypes");
         var expected = new HashSet<Type>(surfaceRoots);
         expected.UnionWith(explicitRoots);
 
@@ -108,19 +136,19 @@ public class ControlPlaneManifestContractTests
     }
 
     [Fact]
-    public void CanonicalHashParserRoot_IsExplicit()
+    public void CanonicalHashParserRoots_AreOwnedByActivationContext()
     {
-        var explicitRoots = GetExplicitRootTypes();
-
-        explicitRoots.Should().BeEquivalentTo(
+        GetRootTypes(ToolContextName, "ExplicitRootTypes").Should().BeEmpty();
+        GetRootTypes(ActivationContextName, "ExplicitRootTypes").Should().BeEquivalentTo(
             [typeof(DescriptorActivationReviewDecision), typeof(CanonicalHash)],
-            "the repository-wide direct-use ledger proves exactly these two non-surface roots");
+            "the activation direct-use ledger proves exactly these two non-surface roots");
     }
 
-    [Fact]
-    public void Manifest_ContainsImportantBoundaryTypes()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void Manifest_ContainsImportantBoundaryTypes(string contextName)
     {
-        var allRoots = GetAllDirectRootTypes();
+        var allRoots = GetRootTypes(contextName, "AllDirectRootTypes");
 
         allRoots.Should().Contain(typeof(DescriptorSearchRequest));
         allRoots.Should().Contain(typeof(DescriptorReviewReportDto));
@@ -130,55 +158,54 @@ public class ControlPlaneManifestContractTests
         allRoots.Should().Contain(typeof(AgentToolDescriptor));
     }
 
-    [Fact]
-    public void Manifest_ExcludesExcludedParameterTypes()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void Manifest_ExcludesExcludedParameterTypes(string contextName)
     {
-        var surfaceRoots = GetSurfaceRootTypes();
+        var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
 
         surfaceRoots.Should().NotContain(typeof(AgentToolInvocationContext),
             "AgentToolInvocationContext is excluded via ExcludedParameterTypes");
-        surfaceRoots.Should().NotContain(typeof(System.Threading.CancellationToken),
+        surfaceRoots.Should().NotContain(typeof(CancellationToken),
             "CancellationToken is a framework type, not a serialization root");
     }
 
-    [Fact]
-    public void Manifest_ExcludesMemberOnlyDtos_AsSurfaceRoots()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void Manifest_ExcludesMemberOnlyDtos_AsSurfaceRoots(string contextName)
     {
-        var surfaceRoots = GetSurfaceRootTypes();
+        var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
+        var explicitRoots = GetRootTypes(contextName, "ExplicitRootTypes");
 
         surfaceRoots.Should().NotContain(typeof(DescriptorActivationReviewDecision),
-            "DescriptorActivationReviewDecision is a member-only DTO, not a surface root");
+            "DescriptorActivationReviewDecision is an explicit activation root, not a surface root");
         surfaceRoots.Should().NotContain(typeof(DescriptorStableHashes),
             "DescriptorStableHashes is a member-only DTO, not a surface root");
-
-        GetExplicitRootTypes().Should().NotContain(typeof(DescriptorStableHashes),
+        explicitRoots.Should().NotContain(typeof(DescriptorStableHashes),
             "DescriptorStableHashes is transitive metadata, not a direct serialization root");
     }
 
-    [Fact]
-    public void ControlPlaneMigration_DoesNotAddJsonContributor()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void ControlPlaneMigration_DoesNotAddJsonContributor(string contextName)
     {
-        var abstractionsAssembly = typeof(AgentControlPlaneToolJsonSerializerContext).Assembly;
-
+        var abstractionsAssembly = GetContextType(contextName).Assembly;
         var contributorTypes = abstractionsAssembly.GetTypes()
-            .Where(t => t.IsInterface
-                        && t.Name.EndsWith("JsonContextContributor"))
+            .Where(t => t.IsInterface && t.Name.EndsWith("JsonContextContributor"))
             .ToList();
 
         contributorTypes.Should().BeEmpty(
-            "ControlPlane.Abstractions migration must not add IAgentToolJsonContextContributor " +
-            "or IMcpToolJsonContextContributor interfaces");
+            "ControlPlane abstraction migration must not add JSON context contributor interfaces");
     }
 
-    [Fact]
-    public void JsonSerializableAttributes_CoverAllDirectRoots()
+    [Theory]
+    [MemberData(nameof(ContextNames))]
+    public void JsonSerializableAttributes_CoverAllDirectRoots(string contextName)
     {
-        var allDirectRoots = GetAllDirectRootTypes();
-        var jsonSerializableTypes = GetJsonSerializableTypes();
+        var allDirectRoots = GetRootTypes(contextName, "AllDirectRootTypes");
+        var jsonSerializableTypes = GetJsonSerializableTypes(contextName);
 
-        var uncovered = allDirectRoots.Except(jsonSerializableTypes).ToList();
-        uncovered.Should().BeEmpty(
-            "all direct root types must have [JsonSerializable] attributes. " +
-            "Uncovered: {0}", string.Join(", ", uncovered.Select(t => t.FullName)));
+        allDirectRoots.Except(jsonSerializableTypes).Should().BeEmpty(
+            "all direct root types must have [JsonSerializable] attributes");
     }
 }

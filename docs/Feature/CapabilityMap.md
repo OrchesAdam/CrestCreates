@@ -191,6 +191,15 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 - 八种模式与真实模型证据（2026-11-24）：ReAct=`AgentReActRunner.RunAsync`；Plan-and-Execute=`SetPlanAsync` + `RunPlanAsync`；Sequential=`RunSequentialAsync`；Parallel=`RunParallelAsync`；Supervisor=`DelegateAsync`；Handoff/Swarm=`OfferHandoffAsync` + `AcceptHandoffAsync`；Group Chat=`RunDiscussionAsync`；Human-in-the-Loop=`WaitForEventAsync` + `ResumeAsync`。DeepSeek 真实模型 live **8/8**（JIT + `InMemoryAgentExecutionStore`，`CREST_AGENT_LIVE_EVAL=1`，单次串行，默认 4096 输出预算）：逐模式记录 HTTP 200/`stop`、usage、模型观测与持久快照；Parallel 以 transport barrier 实测 2 并发；Handoff 验证同 RunId/epoch+1/旧 owner fence/仅显式输入；HITL 验证 wait→durable event→resume→重复 resume 幂等；所有模式断言 Agent Returned 与 Workflow/Capability 空事实集分开。该 live 声明不外推 NativeAOT、PostgreSQL、真实认证/租户/权限或生产 SLA。
 - PostgreSQL NativeAOT 模式与恢复证据（2026-11-24，~/.dotnet 10.0.114，linux-x64）：标准 AotFixture **1/1** 真实 publish/link/run，八种模式各有 sentinel；Plan/Parallel/Handoff/HITL 以全新 Provider 重放；七个独立负控子进程覆盖旧 epoch、跨租户事件、重复派发、迟到结果、JSON 身份/revision 篡改与未知 selector，全部非零且无总 sentinel；三个真实子进程 crash-window 覆盖 handoff accept、event resume、parallel claim。支持声明为 **NativeAOT-verified（linux-x64，仅 scripted model/worker + PostgreSQL V018 已执行场景）**；Parallel 未确认 claim 仍 fail-closed，确认结果后对账重放，不自动重跑 worker。不外推真实模型、认证/租户/权限、其他 ORM/RID、生产 SLA 或 exactly-once。
 
+### CrestCreates.Agent.ControlPlane.Activation.Abstractions 项目准入
+
+- 定位与依赖：Runtime Agent 的激活治理契约，单独拥有 ActivationRequest、BindingHashes、激活策略/评审决策、激活服务端口、完整工具门面与激活 JSON context。依赖方向固定为 `ControlPlane.Activation.Abstractions → ControlPlane.Abstractions → Metadata/Core`；根 Abstractions 不得反向引用激活程序集。
+- 拆分理由：read/draft/review 消费者只依赖根 `ControlPlane.Abstractions` 时，不能在编译引用或公共 API 上获得 Activation 模型。完整门面与激活 DTO 必须与激活契约同程序集，不能保留类型转发、重复 DTO 或根门面兼容壳。
+- 消费者与装配：具体 `CrestCreates.Agent.ControlPlane` 同时引用两个 Abstractions；DescriptorControlPlane、AssetManagement Host/E2E 与 ControlPlane JSON AotFixture 显式引用激活契约。运行时仍只有 `DefaultAgentControlPlaneToolService` 和既有 DI 注册入口。
+- 验证方式：根/激活公共 API 与直接项目引用守卫、双 JSON root manifest 覆盖、Tool DTO 边界扫描、ControlPlane JIT 套件与既有 ControlPlane JsonContracts NativeAOT publish/link/run 门禁。
+- 支持级别与维护：纯契约项目，不新增执行语义或独立支持声明；激活链支持边界沿用 ControlPlane 与 JsonContracts 的逐项证据。技术责任 Runtime Agent / Control Plane。
+- 退出条件：若激活契约重新回流根 Abstractions，或根公共 API/JSON context 再次暴露激活类型，则本拆分失效，必须回退该准入项目而不是维持双轨。
+
 ### AssetManagement MES 与 Microsoft Agent 样例项目准入
 
 - `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Mes`：独立 MES 样例宿主，承载设备生产锁、试运行证据与幂等复产回执。它不是框架 Runtime 组件，消费者为 AssetManagement 关键设备复产验收与外部 MES 集成示例。
@@ -285,6 +294,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Runtime/Agent/CrestCreates.Agent.Orchestration/CrestCreates.Agent.Orchestration.csproj | Runtime | 新增执行实现，见项目准入 | [AgentRunCoordinator](../../src/Runtime/Agent/CrestCreates.Agent.Orchestration/AgentRunCoordinator.cs) |
 | src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
+| src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions/CrestCreates.Agent.ControlPlane.Activation.Abstractions.csproj | Runtime | #57 激活契约拆分，见项目准入 | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentControlPlane/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/Descriptor/arch-design.md) |
 | src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/AgentMemory/arch-design.md) |

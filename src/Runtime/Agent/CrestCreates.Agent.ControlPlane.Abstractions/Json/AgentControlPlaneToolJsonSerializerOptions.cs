@@ -4,11 +4,8 @@ using System.Text.Json.Serialization.Metadata;
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
 /// <summary>
-/// Factory for JsonSerializerOptions pre-configured with the 7e.v1
-/// source-generated contract. Adapters should use CreateDefault() to
-/// obtain a ready-to-use options instance.
-/// When upstream projects expose their own JsonContext, switch to
-/// JsonTypeInfoResolver.Combine() to chain contexts.
+/// Source-generated options for read, draft, review, and package-preview tools.
+/// Activation consumers use AgentControlPlaneActivationJsonSerializerOptions.
 /// </summary>
 public static class AgentControlPlaneToolJsonSerializerOptions
 {

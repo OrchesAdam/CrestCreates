@@ -6,7 +6,7 @@
 
 ### 1.1 前置依赖
 
-Phase 7c 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions` 项目。使用方式：
+read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。使用方式：
 
 ```csharp
 // 引入命名空间
@@ -17,11 +17,14 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 ### 1.2 获取 JSON 序列化选项
 
 ```csharp
-// 预配置的 JsonSerializerOptions，使用 Source Generator 注册
+// read/draft/review/package-preview：不引入 Activation 契约
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
-// 等价于手工构造：
-var options = new JsonSerializerOptions
+// 完整工具面（含 Activation）：显式引用 Activation.Abstractions
+var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+
+// 根选项等价于手工构造：
+var rootOptions = new JsonSerializerOptions
 {
     TypeInfoResolver = JsonTypeInfoResolver.Combine(
         AgentControlPlaneToolJsonSerializerContext.Default)
@@ -483,11 +486,19 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 // 方式一：通过工厂获取预配置选项
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
-// 方式二：手动组合（例如与项目的其他 JsonContext 合并）
-var options = new JsonSerializerOptions
+// 方式二：手动组合根 context（例如与项目的其他 JsonContext 合并）
+var combinedOptions = new JsonSerializerOptions
 {
     TypeInfoResolver = JsonTypeInfoResolver.Combine(
         AgentControlPlaneToolJsonSerializerContext.Default,
+        MyProjectJsonSerializerContext.Default)
+};
+
+// 完整工具面：使用 Activation context，不要从根 context 推断激活契约
+var activationOptions = new JsonSerializerOptions
+{
+    TypeInfoResolver = JsonTypeInfoResolver.Combine(
+        AgentControlPlaneActivationJsonSerializerContext.Default,
         MyProjectJsonSerializerContext.Default)
 };
 ```
@@ -526,12 +537,14 @@ if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
 
 ### 4.3 已注册的类型
 
-`AgentControlPlaneToolJsonSerializerContext` 注册了以下类型族：
+`AgentControlPlaneToolJsonSerializerContext` 只注册 read/draft/review/package-preview 类型族：
 
-- **所有 Root DTO** — `AgentDescriptorDraftDto`、`AgentDraftPayloadDto`、6 个子 payload DTO、`DescriptorSummaryDto`、`AgentReviewResultDto`、6 个摘要 DTO
-- **所有请求/结果类型** — `CreateDescriptorDraftRequest`、`UpdateDescriptorDraftRequest`、`DescriptorSearchRequest`、`ExplainDiagnosticsRequest`、`ApplyFixProposalRequest`、`SubmitActivationRequestRequest`
-- **所有稳定值对象** — `DescriptorRef`、`DescriptorKind`、`DescriptorState`、`RelationshipKind`、`DescriptorStableHashes`、`DescriptorRelationship`
-- **所有基础类型** — `AgentToolResult<T>`、`AgentToolResultStatus`、`AgentToolDiagnostic`、`DraftDifference`、`FixProposalAction`、`ActivationRequestStatus`、`AgentToolDescriptor`、`AgentToolCategory`、`AgentToolActorKind` 等
+- **Root DTO** — `AgentDescriptorDraftDto`、`AgentDraftPayloadDto`、6 个子 payload DTO、`DescriptorSummaryDto`、`AgentReviewResultDto`、6 个摘要 DTO
+- **请求/结果类型** — `CreateDescriptorDraftRequest`、`UpdateDescriptorDraftRequest`、`DescriptorSearchRequest`、`ExplainDiagnosticsRequest`、`ApplyFixProposalRequest`
+- **稳定值对象** — `DescriptorRef`、`DescriptorKind`、`DescriptorState`、`RelationshipKind`、`DescriptorStableHashes`、`DescriptorRelationship`
+- **基础类型** — `AgentToolResult<T>`、`AgentToolResultStatus`、`AgentToolDiagnostic`、`DraftDifference`、`FixProposalAction`、`AgentToolDescriptor`、`AgentToolCategory`、`AgentToolActorKind` 等
+
+`AgentControlPlaneActivationJsonSerializerContext` 注册完整工具门面，并额外拥有 `SubmitActivationRequestRequest`、`AgentToolResult<ActivationRequest>`、`AgentToolResult<ActivationReadinessPreview>`、`DescriptorActivationReviewDecision` 与 `CanonicalHash` 根。根 context 不注册任何 Activation 程序集类型。
 
 ---
 
@@ -809,14 +822,19 @@ public void all_32_tools_are_registered_in_manifest()
 [Fact]
 public void all_tool_request_types_are_in_json_context()
 {
-    // 通过反射检查 JsonSerializable 特性覆盖了所有请求/结果类型
-    var contextType = typeof(AgentControlPlaneToolJsonSerializerContext);
-    var serializables = contextType.GetCustomAttributes<JsonSerializableAttribute>();
-    serializables.Select(a => a.Type)
+    // 根 context 覆盖 read/draft/review/package-preview
+    var rootContextType = typeof(AgentControlPlaneToolJsonSerializerContext);
+    var rootSerializables = rootContextType.GetCustomAttributes<JsonSerializableAttribute>();
+    rootSerializables.Select(a => a.Type)
         .Should().Contain(typeof(CreateDescriptorDraftRequest))
-        .And.Contain(typeof(UpdateDescriptorDraftRequest))
-        // ... 验证所有 32 个工具的类型
-        ;
+        .And.Contain(typeof(UpdateDescriptorDraftRequest));
+
+    // 完整工具面与 Activation 契约由激活 context 覆盖
+    var activationContextType = typeof(AgentControlPlaneActivationJsonSerializerContext);
+    var activationSerializables = activationContextType.GetCustomAttributes<JsonSerializableAttribute>();
+    activationSerializables.Select(a => a.Type)
+        .Should().Contain(typeof(CreateDescriptorDraftRequest))
+        .And.Contain(typeof(SubmitActivationRequestRequest));
 }
 ```
 
@@ -1366,6 +1384,8 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptor
 > **Phase 7e (#17)** 实现了从已审查的描述符草稿到运行时激活的完整安全路径。激活请求生命周期通过 `IDescriptorActivationRequestService` 管理，HumanTask 审查通过 `IActivationReviewOrchestrator` 编排，证据完整性通过 `IActivationEvidenceRechecker` 验证，运行时状态变异通过唯一的 `IRuntimeActivationGate` 入口执行。
 
 ### 14.1 提交激活请求
+
+Activation 契约需显式引用 `CrestCreates.Agent.ControlPlane.Activation.Abstractions` 项目；CLR 命名空间保持 `CrestCreates.Agent.ControlPlane.Abstractions[.Activation]` 不变。
 
 ```csharp
 using CrestCreates.Agent.ControlPlane.Abstractions;

@@ -44,6 +44,7 @@
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Activation.Abstractions/CrestCreates.Agent.ControlPlane.Activation.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />

@@ -22,6 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Agent.ControlPlane.Abstractions\CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Agent.ControlPlane.Activation.Abstractions\CrestCreates.Agent.ControlPlane.Activation.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Agent.DraftContracts\CrestCreates.Agent.DraftContracts.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />

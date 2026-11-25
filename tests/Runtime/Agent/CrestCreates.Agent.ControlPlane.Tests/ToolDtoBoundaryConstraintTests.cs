@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane.Projections;
 using CrestCreates.Agent.DraftContracts.Dto;
@@ -32,6 +33,9 @@ public class ToolDtoBoundaryConstraintTests
 {
     private static readonly Assembly AbstractionsAssembly =
         typeof(AgentControlPlaneToolJsonSerializerContext).Assembly;
+    private static readonly Assembly ActivationAbstractionsAssembly = typeof(ActivationRequest).Assembly;
+    private static readonly Assembly[] AbstractionsAssemblies =
+        [AbstractionsAssembly, ActivationAbstractionsAssembly];
 
     // ── Helper ────────────────────────────────────────────────────────
 
@@ -102,7 +106,7 @@ public class ToolDtoBoundaryConstraintTests
     /// </summary>
     private static IEnumerable<Type> GetDtoTypesForScan()
     {
-        return AbstractionsAssembly.GetExportedTypes()
+        return AbstractionsAssemblies.SelectMany(assembly => assembly.GetExportedTypes())
             .Where(t => t.IsClass && t.IsSealed && !t.IsGenericTypeDefinition)
             .Where(t =>
             {
@@ -143,6 +147,23 @@ public class ToolDtoBoundaryConstraintTests
             foreach (var propType in GetAllPropertyTypes(dtoType, visited))
                 yield return propType;
         }
+    }
+
+    [Fact]
+    public void ActivationContracts_AreOwnedByActivationAbstractions()
+    {
+        var rootNamespace = "CrestCreates.Agent.ControlPlane.Abstractions.";
+        var activationNamespace = $"{rootNamespace}Activation.";
+
+        AbstractionsAssembly.GetType($"{rootNamespace}ActivationRequest").Should().BeNull();
+        AbstractionsAssembly.GetType($"{rootNamespace}SubmitActivationRequestRequest").Should().BeNull();
+        AbstractionsAssembly.GetType($"{rootNamespace}IAgentControlPlaneToolService").Should().BeNull();
+        AbstractionsAssembly.GetType($"{activationNamespace}ActivationRequest").Should().BeNull();
+
+        ActivationAbstractionsAssembly.GetType($"{rootNamespace}ActivationRequest").Should().NotBeNull();
+        ActivationAbstractionsAssembly.GetType($"{rootNamespace}SubmitActivationRequestRequest").Should().NotBeNull();
+        ActivationAbstractionsAssembly.GetType($"{rootNamespace}IAgentControlPlaneToolService").Should().NotBeNull();
+        ActivationAbstractionsAssembly.GetType($"{activationNamespace}BindingHashes").Should().NotBeNull();
     }
 
     // ── Test 1: No IDescriptor exposure ───────────────────────────────
@@ -498,7 +519,7 @@ public class ToolDtoBoundaryConstraintTests
     [Fact]
     public void RequestSide_DraftPayloads_Are_AdapterSafe()
     {
-        var requestTypes = AbstractionsAssembly.GetExportedTypes()
+        var requestTypes = AbstractionsAssemblies.SelectMany(assembly => assembly.GetExportedTypes())
             .Where(t => t.IsClass && t.IsSealed && !t.IsGenericTypeDefinition)
             .Where(t => t.Name.EndsWith("Request"))
             .ToList();

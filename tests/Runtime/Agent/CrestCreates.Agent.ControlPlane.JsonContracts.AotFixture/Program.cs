@@ -65,11 +65,13 @@ public static class ControlPlaneJsonContractFixtureRunner
 
         try
         {
-            var context = AgentControlPlaneToolJsonSerializerContext.Default;
-            var options = context.Options;
+            var rootContext = AgentControlPlaneToolJsonSerializerContext.Default;
+            var context = AgentControlPlaneActivationJsonSerializerContext.Default;
+            var contextOptions = new[] { rootContext.Options, context.Options };
 
-            var reflectionFallbackDisabled = options.TypeInfoResolver is not DefaultJsonTypeInfoResolver
-                && !options.TypeInfoResolverChain.Any(resolver => resolver is DefaultJsonTypeInfoResolver);
+            var reflectionFallbackDisabled = contextOptions.All(options =>
+                options.TypeInfoResolver is not DefaultJsonTypeInfoResolver
+                && !options.TypeInfoResolverChain.Any(resolver => resolver is DefaultJsonTypeInfoResolver));
 
             if (!reflectionFallbackDisabled)
             {
@@ -80,14 +82,20 @@ public static class ControlPlaneJsonContractFixtureRunner
             Console.WriteLine($"ReflectionFallback_IsDisabled:{(reflectionFallbackDisabled ? "PASS" : "FAIL")}");
 
             bool allPassed = true;
+            var searchRequest = new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 };
+            var toolResult = AgentToolResult<string>.Success("hello-aot");
 
-            allPassed &= RoundTrip<DescriptorSearchRequest>(
-                new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 },
-                "DescriptorSearchRequest");
+            var rootRepresentativeRootsPassed =
+                RoundTrip(searchRequest, "DescriptorSearchRequest/Root", rootContext)
+                & RoundTrip(toolResult, "AgentToolResult<string>/Root", rootContext);
+            allPassed &= rootRepresentativeRootsPassed;
+            Console.WriteLine($"RootContext_RepresentativeRoots:{(rootRepresentativeRootsPassed ? "PASS" : "FAIL")}");
 
-            allPassed &= RoundTrip<AgentToolResult<string>>(
-                AgentToolResult<string>.Success("hello-aot"),
-                "AgentToolResult<string>");
+            var activationRepresentativeRootsPassed =
+                RoundTrip(searchRequest, "DescriptorSearchRequest/Activation", context)
+                & RoundTrip(toolResult, "AgentToolResult<string>/Activation", context);
+            allPassed &= activationRepresentativeRootsPassed;
+            Console.WriteLine($"ActivationContext_RepresentativeRoots:{(activationRepresentativeRootsPassed ? "PASS" : "FAIL")}");
 
             allPassed &= RoundTrip<DescriptorActivationReviewDecision>(
                 new DescriptorActivationReviewDecision
@@ -103,9 +111,10 @@ public static class ControlPlaneJsonContractFixtureRunner
                     BoundEvidenceHash = FixtureHash,
                     BoundEnvelopeHash = FixtureHash
                 },
-                "DescriptorActivationReviewDecision");
+                "DescriptorActivationReviewDecision",
+                context);
 
-            allPassed &= RoundTrip<CanonicalHash>(FixtureHash, "CanonicalHash");
+            allPassed &= RoundTrip(FixtureHash, "CanonicalHash", context);
 
             var localizedCatalog = new DefaultDescriptorReviewMessageTemplateCatalog(
                 new KeyReturningLocalizationService("zh-CN"),
@@ -126,21 +135,30 @@ public static class ControlPlaneJsonContractFixtureRunner
             else
                 Console.Error.WriteLine($"FAIL: localized descriptor-governance message was '{localizedMessage}'.");
 
-            bool unregisteredTypeRejected = false;
-            try
+            var unregisteredTypeRejected = new JsonSerializerContext[] { rootContext, context }.All(serializerContext =>
             {
-                var unregisteredTypeInfo = context.GetTypeInfo(typeof(System.Net.Http.HttpClient));
-                unregisteredTypeRejected = unregisteredTypeInfo is null;
-            }
-            catch (NotSupportedException)
-            {
-                unregisteredTypeRejected = true;
-            }
+                try
+                {
+                    return serializerContext.GetTypeInfo(typeof(System.Net.Http.HttpClient)) is null;
+                }
+                catch (NotSupportedException)
+                {
+                    return true;
+                }
+            });
 
             if (!unregisteredTypeRejected)
             {
                 Console.Error.WriteLine("FAIL: Unregistered type resolved — fail-closed violated.");
                 allPassed = false;
+            }
+
+            var rootActivationRejected = rootContext.GetTypeInfo(typeof(ActivationRequest)) is null;
+            allPassed &= rootActivationRejected;
+            Console.WriteLine($"RootContext_ActivationRejected:{(rootActivationRejected ? "PASS" : "FAIL")}");
+            if (!rootActivationRejected)
+            {
+                Console.Error.WriteLine("FAIL: root context resolved an Activation contract.");
             }
 
             allPassed &= RunActivationReviewCallbackBoundary();
@@ -737,11 +755,10 @@ public static class ControlPlaneJsonContractFixtureRunner
         public object? GetService(Type serviceType) => null;
     }
 
-    private static bool RoundTrip<T>(T value, string label) where T : notnull
+    private static bool RoundTrip<T>(T value, string label, JsonSerializerContext context) where T : notnull
     {
         try
         {
-            var context = AgentControlPlaneToolJsonSerializerContext.Default;
             var json = JsonSerializer.Serialize(value, typeof(T), context);
             var deserialized = JsonSerializer.Deserialize(json, typeof(T), context);
             if (deserialized is null)

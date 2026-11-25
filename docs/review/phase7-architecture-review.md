@@ -249,6 +249,8 @@ ControlPlane.Abstractions (read + draft + review DTOs)
   └─> ControlPlane.Activation.Abstractions (activation + binding + policy)
 ```
 
+**实施校正（2026-11-25，#57）**：Activation 契约本身引用根 `AgentToolResult<T>`、`AgentToolInvocationContext` 等类型，因此上图箭头会形成循环。实际唯一方向为 `ControlPlane.Activation.Abstractions → ControlPlane.Abstractions`；完整 `IAgentControlPlaneToolService` 与 Activation DTO 归激活程序集，根程序集只保留 read/draft/review/package-preview 门面。CLR 命名空间不变，不增加类型转发或兼容双轨。P1-4 已关闭。
+
 ---
 
 ### 🟡 P1-5: Prompting / Authoring 测试覆盖部分不足 ✅ 已修复
@@ -448,7 +450,7 @@ Authoring 和 Prompting 没有类似覆盖。添加新 DTO 时可能遗漏 `[Jso
 | 🟡 P1-3 | 边界测试缺口 | 添加 Metadata/Draft 边界测试 | 依赖 P0-1 完成后才能通过 | ✅ 已修复 |
 | 🟡 P1-2 | InMemory 作为生产默认 | 拆分 DI 注册，修复 CanReject 和 fake DescriptorRef | — | ✅ 已修复 |
 | 🟡 P1-7 | 27 方法 facade | 提取子接口与 authorization 对齐 | — | ✅ 已修复 |
-| 🟡 P1-4 | Abstractions 95 文件过厚 | 拆分 Activation 契约 | 可与 P1-7 同步 | ⏳ 后续优化 |
+| 🟡 P1-4 | Abstractions 95 文件过厚 | 拆分 Activation 契约 | 可与 P1-7 同步 | ✅ 已修复（#57，2026-11-25） |
 | 🟡 P1-5 | Prompting / Authoring 测试部分不足 | 补充 EvidenceFactory projection + serializer coverage 测试 | — | ✅ 已修复 |
 | 🟡 P1-6 | SG 覆盖不足 | 优先自动生成 JsonSerializerContext | — | ⏳ 后续优化 |
 | ⚪ P2-8 | Authoring/Prompting 缺 serializer coverage | 推广 ToolContractCoverageTests 模式 | — | ✅ 已修复 |

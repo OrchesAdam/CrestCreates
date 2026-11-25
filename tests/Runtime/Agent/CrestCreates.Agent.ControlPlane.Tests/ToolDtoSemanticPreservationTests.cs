@@ -23,7 +23,7 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 public class ToolDtoSemanticPreservationTests
 {
     private static readonly JsonSerializerOptions JsonOptions =
-        AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+        AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
 
     private static T RoundTrip<T>(T value) where T : class
     {

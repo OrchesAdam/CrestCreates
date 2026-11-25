@@ -20,7 +20,7 @@ Phase 7h 实现了 Agent Prompt Contracts 和 Prompt Versioning——为 LLM-bac
 
 核心交付物：
 - **32 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（30 个 facade + 2 个 manifest query）
-- **Source-Generated JSON Contract** — `AgentControlPlaneToolJsonSerializerContext`，AoT 兼容
+- **Source-Generated JSON Contract** — 根 `AgentControlPlaneToolJsonSerializerContext` 覆盖 read/draft/review/package preview；`AgentControlPlaneActivationJsonSerializerContext` 覆盖完整工具门面与 Activation 契约，两者均为 source-generated
 - **Source-Generated Payload DTOs (New in #42)** — `AgentDraftPayloadDto` 和 6 个子 record 由 `AgentDraftContractGenerator` 在 `CrestCreates.CodeGenerator` 中生成
 - **Source-Generated Patch DTOs (New in #42)** — `AgentDraftPayloadPatchDto` 和 `Agent{Kind}DraftChangedField` 枚举用于 Update 操作的字段级合并
 - **Source-Generated Projection (New in #42)** — `AgentDraftPayloadProjection` 提供 `Create`、`FromDomain`、`Merge` 方法，替代手写 payload 投影
@@ -30,7 +30,7 @@ Phase 7h 实现了 Agent Prompt Contracts 和 Prompt Versioning——为 LLM-bac
 - **Review Report Renderer (Phase 7d)** — `IDescriptorReviewReportRenderer` + `DefaultDescriptorReviewReportRenderer`，Markdown/PlainText 确定性投影
 - **Message Template Catalog (Phase 7d)** — `IDescriptorReviewMessageTemplateCatalog` + `DefaultDescriptorReviewMessageTemplateCatalog`，31 个确定性模板
 - **Fix Proposal Contract Upgrade (Phase 7d)** — `FixProposalKind`（9 值）、`FixProposalActionKind`（10 值）、`FixProposalApplicability`（4 值）、`FixProposalActionSafetyLevel`（4 值）、`JsonElement?` 值类型
-- **Activation Abstractions (Phase 7e)** — 15 个激活契约类型：`ActivationRequest`、`ActivationBindingSnapshot`、`BindingHashes`（7 字段 CanonicalHash：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash）、`ActivationRequestStatus`、`DescriptorActivationReviewDecision`、`DescriptorActivationReviewTaskInput`、`DescriptorActivationPolicy`、`DescriptorActivationEligibility` 等
+- **Activation Abstractions (Phase 7e / #57)** — 激活契约独立归 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`：`ActivationRequest`、`ActivationBindingSnapshot`、`BindingHashes`（7 字段 CanonicalHash：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash）、`ActivationRequestStatus`、`DescriptorActivationReviewDecision`、`DescriptorActivationReviewTaskInput`、`DescriptorActivationPolicy`、`DescriptorActivationEligibility` 等；CLR 命名空间保持既有形状，程序集边界替代类型转发
 - **Activation Services (Phase 7e)** — 7 个核心接口 + 8 个实现：`IDescriptorActivationRequestService`（生命周期）、`IActivationEvidenceRechecker`（证据重校验）、`IRuntimeActivationGate`（唯一运行时状态变异入口）、`IActivationReviewOrchestrator`（HumanTask 编排）、`IActivationBindingArtifactResolver`（绑定引用哈希解析）、`IDescriptorActivationPolicyProvider`（策略）、`IDescriptorActivationAuditor`（审计）
 - **HumanTask + EventBus Integration (Phase 7e)** — `DescriptorActivationReviewHumanTaskEventHandler` 处理 HumanTask 完成回调，触发审查决策处理
 - **Governance Integration (Phase 7e)** — 治理决策从审查结果流向 `SubmitActivationRequestRequest.GovernanceDecision`，绑定到激活请求快照
@@ -97,7 +97,8 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | 项目 | 内容 |
 |------|------|
 | `CrestCreates.Agent.DraftContracts` | Spec 文件（`[AgentDraftContractSpec]`、`[AgentDraftField]` 等）、引用 `CrestCreates.CodeGenerator` → 生成 payload DTO、patch DTO、changed-field 枚举、投影类、manifest |
-| `CrestCreates.Agent.ControlPlane.Abstractions` | Tool DTO（请求/结果类型）、JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
+| `CrestCreates.Agent.ControlPlane.Abstractions` | read/draft/review/package-preview Tool DTO、根 JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
+| `CrestCreates.Agent.ControlPlane.Activation.Abstractions` | Activation DTO、绑定/策略/评审/服务端口、`IActivationControlPlaneTools`、完整 `IAgentControlPlaneToolService` 与激活 JSON 上下文；单向引用根 Abstractions |
 | `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
 | `CrestCreates.Agent.Memory.Abstractions` | Agent Memory 合约（27 个 sealed record/enum + 11 个接口 + DiagnosticCodes + CanonicalShapeVersions + AgentMemoryJsonSerializerContext）；不引用 ControlPlane.Abstractions |
 | `CrestCreates.Agent.Memory` | 11 个默认服务实现：4 个 InMemory Store、Sanitizer、Compressor、Extractor、PromotionService、Retriever、SourceExpander、AuthoringContextBuilder、AgentMemoryCanonicalHashProjector |
@@ -123,17 +124,18 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  AgentControlPlaneToolJsonSerializerContext ([JsonCtx])   │    │
-│  │  ┌──────────────┐ ┌────────────────┐ ┌──────────────┐    │    │
-│  │  │ Root DTOs    │ │ Stable VOs     │ │ Base Types   │    │    │
-│  │  │ (32 tools)   │ │ (DescriptorRef,│ │ (AgentTool-  │    │    │
-│  │  │              │ │  DescriptorKind,│ │  Result<T>,   │    │    │
-│  │  │              │ │  ...)          │ │  Diagnostic)  │    │    │
-│  │  └──────────────┘ └────────────────┘ └──────────────┘    │    │
+│  │  read / draft / review / package-preview roots            │    │
+│  │  (no Activation assembly types)                           │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
-│  │  AgentControlPlaneToolJsonSerializerOptions               │    │
-│  │  CreateDefault() → TypeInfoResolver = Combine(SG Ctx)    │    │
+│  │  AgentControlPlaneActivationJsonSerializerContext        │    │
+│  │  full 32-tool facade + Activation DTOs + decision/hash    │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  Root / Activation JsonSerializerOptions                 │    │
+│  │  CreateDefault() → source-generated context resolver      │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
@@ -227,8 +229,10 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentGovernanceSummaryDto` | Abstractions/ToolDtos | 治理决策摘要 | **Implemented** |
 | `CreateDescriptorDraftRequest` | Abstractions | 创建草稿请求（含 `AgentDraftPayloadDto`） | **Implemented** |
 | `UpdateDescriptorDraftRequest` | Abstractions | 更新草稿请求（含 `AgentDraftPayloadPatchDto?`） | **Implemented (#42)** |
-| `AgentControlPlaneToolJsonSerializerContext` | Abstractions/Json | Source-generated JSON 序列化上下文，注册所有 Root DTO + 稳定值对象 | **Implemented** |
-| `AgentControlPlaneToolJsonSerializerOptions` | Abstractions/Json | `CreateDefault()` 工厂方法 | **Implemented** |
+| `AgentControlPlaneToolJsonSerializerContext` | ControlPlane.Abstractions/Json | Source-generated JSON 序列化上下文，注册 read/draft/review/package-preview Root DTO + 稳定值对象 | **Implemented** |
+| `AgentControlPlaneToolJsonSerializerOptions` | ControlPlane.Abstractions/Json | 根工具面 `CreateDefault()` 工厂方法 | **Implemented** |
+| `AgentControlPlaneActivationJsonSerializerContext` | ControlPlane.Activation.Abstractions/Json | 完整工具门面、Activation DTO 与决策/hash 显式根 | **Implemented (#57)** |
+| `AgentControlPlaneActivationJsonSerializerOptions` | ControlPlane.Activation.Abstractions/Json | 完整工具面 `CreateDefault()` 工厂方法 | **Implemented (#57)** |
 | `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7e.v1"` | **Implemented** |
 | `AgentToolDescriptor.ContractVersion` | Abstractions | 工具描述符上的契约版本字段 | **Implemented** |
 | `AgentToolName` | Abstractions | 32 个工具名称常量 | **Implemented** |
