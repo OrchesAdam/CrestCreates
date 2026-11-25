@@ -1,5 +1,14 @@
 # CrestCreates platform status — 2026-11-25
 
+## 2026-11-25 — Issue #57 Activation 契约拆分（本地完成，待 PR）
+
+- **边界裁定**：Issue 建议的 `ControlPlane.Abstractions → Activation.Abstractions` 会与 Activation 对根 `AgentToolResult<T>` / `AgentToolInvocationContext` 的依赖形成循环；实际唯一方向为 `ControlPlane.Activation.Abstractions → ControlPlane.Abstractions`。24 个 Activation 契约文件（含根命名空间的 5 个 DTO）迁入新项目，完整 `IAgentControlPlaneToolService`、`IActivationControlPlaneTools` 与 activation readiness 方法一并归激活程序集；CLR 命名空间不变，无 TypeForwardedTo、重复 DTO 或兼容壳。
+- **JSON 所有权**：根 `AgentControlPlaneToolJsonSerializerContext` 只覆盖 read/draft/review/package-preview；新 `AgentControlPlaneActivationJsonSerializerContext` 覆盖完整 32 工具门面、Activation DTO、`DescriptorActivationReviewDecision` 与 `CanonicalHash` 显式根。决策 parser 与 runtime-state contributor 改消费激活 context。
+- **消费方与治理**：具体 ControlPlane、ControlPlane.Tests、JSON AotFixture、Boundary、DescriptorControlPlane、AssetManagement Host/E2E 显式引用新项目；五个 `.slnx`、CapabilityMap 准入/索引、依赖边界、公共 API、Tool DTO/JSON manifest 测试与 Active 文档同步更新。共享工具名/权限字符串保留根命名空间，不构成 Activation 模型依赖。
+- **串行证据（~/.dotnet 10.0.114）**：根解决方案 build **0 error / 46 warning**（warning 均位于未改动的既有 AOP/Caching/EF/Plugin/Boundary 文件，新项目 0 warning）；ControlPlane **621/621**；Boundary 聚焦 **53/53**、完整 **301/301**；DescriptorControlPlane Samples **37/37**；ControlPlane JsonContracts NativeAOT **11/11**（真实 publish/link/run，根/激活 context 各自代表性 DTO、根拒绝 Activation、9 个 authoring 负控与未知控制名）。
+- **Evidence 环境**：为完整 Boundary 使用专用一次性 PG16（127.0.0.1:55432）串行补跑 DescriptorDraft **132/132**、Organization **223/223**、PostgreSQL **497/497**、PostgreSQL AotFixture **1/1**，evidence **573/581 → 581/581**；容器与卷已删除，未触碰共享 `crest-test-*` 服务。首次全 Boundary 的 5 红为缺 PG/evidence，第二次 2 红为 C07/O15 在 gate 后写文件的既有顺序问题，持久 evidence 补齐后全绿。
+- **状态**：实现提交为 `50f88617`（`refactor: split activation contracts from control plane`），已推送分支 `feat/issue-57-split-activation-contracts-20261125` 并创建 [PR #196](https://github.com/OrchesAdam/CrestCreates/pull/196)；等待审查，不自动合并或关闭 Issue。支持声明不变，未新增生产执行语义。
+
 ## 2026-11-25 — PR #194 Boundary CI 内存终止修复（未合并）
 
 - **失败定位**：远端 CI run `45520522296` 的 `Test — Dependency Boundaries` 在约 174 秒后以 exit 143 终止，日志无断言失败。本地复现旧实现时 testhost RSS 超过 24 GB；根因是租户身份守卫为每个项目重复装载相同程序集元数据，并常驻全部 Roslyn compilation context。
