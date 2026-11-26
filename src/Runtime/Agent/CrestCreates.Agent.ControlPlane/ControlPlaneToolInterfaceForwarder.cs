@@ -2,7 +2,6 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.ContextPack.Abstractions;
-using Microsoft.Extensions.DependencyInjection;
 
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 
@@ -15,9 +14,9 @@ internal sealed class ControlPlaneToolInterfaceForwarder :
 {
     private readonly IAgentControlPlaneToolService _facade;
 
-    public ControlPlaneToolInterfaceForwarder(IServiceProvider serviceProvider)
+    public ControlPlaneToolInterfaceForwarder(IAgentControlPlaneToolService facade)
     {
-        _facade = serviceProvider.GetRequiredService<IAgentControlPlaneToolService>();
+        _facade = facade;
     }
 
     public Task<AgentToolResult<MetadataContextPack>> BuildMetadataContextPackAsync(

@@ -176,17 +176,26 @@ public class ToolContractCoverageTests
     }
 
     [Fact]
-    public void SerializerOptions_ContainOnlyGeneratedResolverChain_AndMatchContextPolicies()
+    public void SerializerOptions_ContainOnlyGeneratedResolverChain_AndExposeExplicitWirePolicies()
     {
-        var contexts = new (JsonSerializerOptions Options, JsonSerializerContext Context)[]
+        var legacyOptions = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+        legacyOptions.TypeInfoResolver.Should().NotBeNull("options must have a type info resolver");
+        legacyOptions.TypeInfoResolver.Should().NotBeOfType<DefaultJsonTypeInfoResolver>(
+            "resolver must be source-generated, not DefaultJsonTypeInfoResolver");
+        legacyOptions.TypeInfoResolverChain.Should().NotContain(
+            resolver => resolver is DefaultJsonTypeInfoResolver,
+            "DefaultJsonTypeInfoResolver must not appear in the resolver chain");
+        legacyOptions.PropertyNamingPolicy.Should().BeNull("the existing root factory preserves PascalCase wire names");
+        legacyOptions.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.Never);
+
+        var alignedOptions = new[]
         {
-            (AgentControlPlaneToolJsonSerializerOptions.CreateDefault(),
-                AgentControlPlaneToolJsonSerializerContext.Default),
-            (AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
-                AgentControlPlaneActivationJsonSerializerContext.Default)
+            AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned(),
+            AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
+            AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned()
         };
 
-        foreach (var (serializerOptions, context) in contexts)
+        foreach (var serializerOptions in alignedOptions)
         {
             serializerOptions.TypeInfoResolver.Should().NotBeNull("options must have a type info resolver");
             serializerOptions.TypeInfoResolver.Should().NotBeOfType<DefaultJsonTypeInfoResolver>(
@@ -194,11 +203,30 @@ public class ToolContractCoverageTests
             serializerOptions.TypeInfoResolverChain.Should().NotContain(
                 resolver => resolver is DefaultJsonTypeInfoResolver,
                 "DefaultJsonTypeInfoResolver must not appear in the resolver chain");
-            serializerOptions.PropertyNamingPolicy.Should().BeSameAs(context.Options.PropertyNamingPolicy);
-            serializerOptions.DefaultIgnoreCondition.Should().Be(context.Options.DefaultIgnoreCondition);
-            serializerOptions.PropertyNameCaseInsensitive.Should().Be(context.Options.PropertyNameCaseInsensitive);
-            serializerOptions.NumberHandling.Should().Be(context.Options.NumberHandling);
+            serializerOptions.PropertyNamingPolicy.Should().BeSameAs(JsonNamingPolicy.CamelCase);
+            serializerOptions.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.WhenWritingNull);
         }
+    }
+
+    [Fact]
+    public void RootSerializerOptions_PreserveLegacyFactoryPayloads()
+    {
+        const string legacyPayload = """
+            {"Namespace":null,"Kind":null,"NameContains":"pump","State":null,"MaxResults":1}
+            """;
+
+        var request = JsonSerializer.Deserialize<DescriptorSearchRequest>(
+            legacyPayload,
+            AgentControlPlaneToolJsonSerializerOptions.CreateDefault());
+
+        request.Should().NotBeNull();
+        request!.NameContains.Should().Be("pump");
+        request.MaxResults.Should().Be(1);
+
+        var serialized = JsonSerializer.Serialize(request, AgentControlPlaneToolJsonSerializerOptions.CreateDefault());
+        serialized.Should().Contain("\"NameContains\":\"pump\"")
+            .And.Contain("\"Namespace\":null")
+            .And.NotContain("\"nameContains\"");
     }
 
     [Fact]
@@ -264,7 +292,7 @@ public class ToolContractCoverageTests
     {
         var contexts = new (JsonSerializerOptions Options, JsonSerializerContext Context)[]
         {
-            (AgentControlPlaneToolJsonSerializerOptions.CreateDefault(),
+            (AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned(),
                 AgentControlPlaneToolJsonSerializerContext.Default),
             (AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
                 AgentControlPlaneActivationJsonSerializerContext.Default)

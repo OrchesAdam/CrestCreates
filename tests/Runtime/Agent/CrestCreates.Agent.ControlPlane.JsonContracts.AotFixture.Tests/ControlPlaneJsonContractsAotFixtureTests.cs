@@ -23,6 +23,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
         "ReflectionFallback_IsDisabled",
         "RootContext_RepresentativeRoots",
         "ActivationContext_RepresentativeRoots",
+        "PublicSerializerFactories_RepresentativeRoots",
         "RootContext_ActivationRejected",
         "AgentDraftIdentityBinding",
         "ReviewHashInputSourceGeneratedRoundTrip",

@@ -17,28 +17,25 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 ### 1.2 获取 JSON 序列化选项
 
 ```csharp
-// read/draft/review/package-preview：不引入 Activation 契约
+// read/draft/review/package-preview：保留既有 PascalCase wire 格式
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+
+// 需要与生成 context 一致的 camelCase / 忽略 null 格式时显式使用：
+var contextAlignedOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
 
 // 完整工具面（含 Activation）：显式引用 Activation.Abstractions
 var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
-
-// 根选项等价于复制生成 context 的配置（camelCase、忽略 null）：
-var rootOptions = new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
 ```
 
 ### 1.3 序列化示例
 
 ```csharp
-// 反序列化工具结果
-var result = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(json, options);
-
 // 序列化创建草稿请求
 var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
@@ -57,6 +54,9 @@ var request = new CreateDescriptorDraftRequest
 };
 
 var json = JsonSerializer.Serialize(request, options);
+
+// 反序列化同一请求
+var deserializedRequest = JsonSerializer.Deserialize<CreateDescriptorDraftRequest>(json, options);
 ```
 
 ---
@@ -488,10 +488,11 @@ var workflowPatch = new AgentDraftPayloadPatchDto
 ```csharp
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
-// 方式一：通过工厂获取预配置选项
+// 方式一：通过工厂获取兼容旧载荷的预配置选项
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
 // 方式二：从根 context 配置开始，再与其他 JsonContext 合并
+// 该格式为 camelCase / 忽略 null，与 CreateDefault 的旧 wire 格式不同
 var combinedOptions = new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
 combinedOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
     AgentControlPlaneToolJsonSerializerContext.Default,
@@ -512,7 +513,7 @@ var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
@@ -526,13 +527,27 @@ string json = JsonSerializer.Serialize(request, options);
 var deserialized = JsonSerializer.Deserialize<CreateDescriptorDraftRequest>(json, options);
 
 // ── 工具结果反序列化 ──
-var resultJson = """{"status":"Success","value":{"draftId":"...","descriptorKind":"Schema",...},"diagnostics":[]}""";
-var result = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options);
-
-if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
+// 使用同一工厂生成完整 JSON；枚举默认按数值序列化，不填写字符串枚举名
+var draftDto = new AgentDescriptorDraftDto
 {
-    var dto = result.Value;
-    Console.WriteLine($"Draft {dto.DraftId} for descriptor {dto.DescriptorId}");
+    TenantId = "tenant-1",
+    DraftId = "draft-1",
+    DescriptorKind = DescriptorKind.Schema,
+    DescriptorId = "schema_blog_post",
+    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
+    AuthorKind = DescriptorDraft.Abstractions.DescriptorDraftAuthorKind.Agent,
+    AuthorId = "agent-1",
+    CreatedAt = DateTimeOffset.UtcNow,
+    Payload = request.Payload
+};
+var result = AgentToolResult<AgentDescriptorDraftDto>.Success(draftDto);
+var resultJson = JsonSerializer.Serialize(result, options);
+var roundTrippedResult = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options);
+
+if (roundTrippedResult.Status == AgentToolResultStatus.Success && roundTrippedResult.Value is not null)
+{
+    var resultDto = roundTrippedResult.Value;
+    Console.WriteLine($"Draft {resultDto.DraftId} for descriptor {resultDto.DescriptorId}");
 }
 ```
 

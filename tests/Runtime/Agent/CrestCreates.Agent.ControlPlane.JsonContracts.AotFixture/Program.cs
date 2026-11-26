@@ -22,6 +22,8 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Localization.Services;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.ContextPack;
+using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
@@ -220,6 +222,56 @@ public static class ControlPlaneJsonContractFixtureRunner
             {
                 Console.Error.WriteLine("FAIL: root context resolved an Activation contract.");
             }
+
+            var contextPackWithoutTruncation = CreateContextPack(null);
+            var contextPackWithTruncation = CreateContextPack(3);
+            var readiness = new ActivationReadinessPreview
+            {
+                DraftId = "draft-readiness-aot",
+                TenantId = "tenant-aot",
+                IsReady = false,
+                Blockers =
+                [
+                    new ActivationReadinessBlocker
+                    {
+                        Code = new DiagnosticCode("REVIEW_REQUIRED"),
+                        Message = "Human review is required.",
+                        Severity = SeverityLevel.Blocker,
+                        Remedy = "Complete the review."
+                    }
+                ],
+                Diagnostics = [],
+                ReviewResultId = "review-aot",
+                PackagePreviewId = "package-aot"
+            };
+            var rootOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
+            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+            var publicFactoryRootsPassed =
+                RoundTrip(searchRequest, "LegacySearchRequest/RootFactory",
+                    AgentControlPlaneToolJsonSerializerOptions.CreateDefault(), value =>
+                        value.NameContains == "test-query" && value.MaxResults == 10)
+                & RoundTrip(contextPackWithoutTruncation, "ContextPack/NullTruncation/RootFactory", rootOptions, value =>
+                    value.Summary.TruncatedAtCount is null && value.Summary.TotalDescriptorCount == 1)
+                & RoundTrip(contextPackWithTruncation, "ContextPack/Truncated/RootFactory", rootOptions, value =>
+                    value.Summary.TruncatedAtCount == 3 && value.Summary.WasTruncated)
+                & RoundTrip(AgentToolResult<MetadataContextPack>.Success(contextPackWithoutTruncation),
+                    "ContextPackResult/RootFactory", rootOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.Summary.TruncatedAtCount is null)
+                & RoundTrip(AgentToolResult<MetadataContextPack>.Success(contextPackWithTruncation),
+                    "ContextPackResult/ActivationFactory", activationOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.Summary.TruncatedAtCount == 3)
+                & RoundTrip(AgentToolResult<ActivationReadinessPreview>.Success(readiness),
+                    "ActivationReadinessResult/ActivationFactory", activationOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.DraftId == "draft-readiness-aot"
+                        && !value.Value.IsReady
+                        && value.Value.ReviewResultId == "review-aot"
+                        && value.Value.PackagePreviewId == "package-aot"
+                        && value.Value.Blockers.Single().Remedy == "Complete the review.");
+            allPassed &= publicFactoryRootsPassed;
+            Console.WriteLine($"PublicSerializerFactories_RepresentativeRoots:{(publicFactoryRootsPassed ? "PASS" : "FAIL")}");
 
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
@@ -815,16 +867,56 @@ public static class ControlPlaneJsonContractFixtureRunner
         public object? GetService(Type serviceType) => null;
     }
 
+    private static MetadataContextPack CreateContextPack(int? truncatedAtCount) => new()
+    {
+        Request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = [new DescriptorRef("test", "descriptor-aot", 1)]
+        },
+        Descriptors =
+        [
+            new MetadataContextPackDescriptorEntry
+            {
+                Ref = new DescriptorRef("test", "descriptor-aot", 1),
+                Kind = DescriptorKind.Capability,
+                Name = "Descriptor AOT",
+                State = DescriptorState.Active
+            }
+        ],
+        Relationships = [],
+        Summary = new MetadataContextPackSummary
+        {
+            TotalDescriptorCount = 1,
+            DescriptorCountsByKind = new Dictionary<DescriptorKind, int> { [DescriptorKind.Capability] = 1 },
+            TotalRelationshipCount = 0,
+            RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(),
+            FocusRefs = [new DescriptorRef("test", "descriptor-aot", 1)],
+            WasTruncated = truncatedAtCount is not null,
+            TruncatedAtCount = truncatedAtCount,
+            TraversalDepthReached = 1
+        },
+        Diagnostics = []
+    };
+
     private static bool RoundTrip<T>(
         T value,
         string label,
         JsonSerializerContext context,
+        Func<T, bool>? verify = null) where T : notnull =>
+        RoundTrip(value, label, (JsonSerializerOptions)context.Options, verify);
+
+    private static bool RoundTrip<T>(
+        T value,
+        string label,
+        JsonSerializerOptions options,
         Func<T, bool>? verify = null) where T : notnull
     {
         try
         {
-            var json = JsonSerializer.Serialize(value, typeof(T), context);
-            var deserialized = JsonSerializer.Deserialize(json, typeof(T), context);
+            var typeInfo = (JsonTypeInfo<T>)options.GetTypeInfo(typeof(T));
+            var json = JsonSerializer.Serialize(value, typeInfo);
+            var deserialized = JsonSerializer.Deserialize(json, typeInfo);
             if (deserialized is null)
             {
                 Console.Error.WriteLine($"FAIL [{label}]: deserialized null.");
@@ -838,7 +930,7 @@ public static class ControlPlaneJsonContractFixtureRunner
                 return false;
             }
 
-            var reJson = JsonSerializer.Serialize(deserialized, typeof(T), context);
+            var reJson = JsonSerializer.Serialize(deserialized, typeInfo);
             if (json != reJson)
             {
                 Console.Error.WriteLine($"FAIL [{label}]: round-trip mismatch.");

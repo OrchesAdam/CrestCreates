@@ -9,6 +9,11 @@ public static class AgentControlPlaneActivationJsonSerializerOptions
 {
     public static JsonSerializerOptions CreateDefault()
     {
+        return CreateContextAligned();
+    }
+
+    public static JsonSerializerOptions CreateContextAligned()
+    {
         return new JsonSerializerOptions(AgentControlPlaneActivationJsonSerializerContext.Default.Options);
     }
 }
