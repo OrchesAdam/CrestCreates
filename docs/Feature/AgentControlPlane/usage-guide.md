@@ -419,37 +419,37 @@ var valid = new AgentDraftPayloadDto
 
 ### 3.3 AgentDraftPayloadPatchDto — 构造 Update 负载
 
-> **New in #42**：Update 操作使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`。Patch DTO 所有字段均为 nullable，配合 `ChangedFields` 枚举实现字段级合并。
+> **New in #42**：Update 操作使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`。外层只选择描述符类型；每个子 Patch 同时提供完整 `Payload` 和强类型 `ChangedFields` 标志。未标记字段在 Merge 时保留现有值。
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+
+// existingCapability / existingWorkflow 是当前 Agent*DraftPayloadDto 值。
 // Capability Update 示例 — 只更新 Name 和 State
 var capabilityPatch = new AgentDraftPayloadPatchDto
 {
     Discriminator = DescriptorKind.Capability,
-    ChangedFields = new HashSet<Enum>
-    {
-        AgentCapabilityDraftChangedField.Name,
-        AgentCapabilityDraftChangedField.State
-    },
     Capability = new AgentCapabilityDraftPayloadPatchDto
     {
-        Name = "UpdatedCapability",
-        State = "Active"
-        // DescriptorRef, ContractHash 等未设置 → 在 Merge 中保留现有值
+        Payload = existingCapability with
+        {
+            Name = "UpdatedCapability",
+            State = DescriptorState.Active
+        },
+        ChangedFields = AgentCapabilityDraftChangedField.Name
+            | AgentCapabilityDraftChangedField.State
     }
 };
 
-// Workflow Update 示例 — 清除 InputSchema
+// Workflow Update 示例 — 清除 VariableSchema
 var workflowPatch = new AgentDraftPayloadPatchDto
 {
     Discriminator = DescriptorKind.Workflow,
-    ChangedFields = new HashSet<Enum>
-    {
-        AgentWorkflowDraftChangedField.InputSchema
-    },
     Workflow = new AgentWorkflowDraftPayloadPatchDto
     {
-        InputSchema = null  // 显式置空
+        Payload = existingWorkflow with { VariableSchema = null },
+        ChangedFields = AgentWorkflowDraftChangedField.VariableSchema
     }
 };
 ```
@@ -860,42 +860,50 @@ public void all_tool_request_types_are_in_json_context()
 验证 Patch Merge 的字段级合并语义：
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Agent.DraftContracts.Projection;
+
 [Fact]
 public void Merge_only_updates_changed_fields()
 {
-    var existing = CreateSampleCapabilityPayload();
+    var existingDto = CreateSampleCapabilityPayload();
+    var existingPayload = AgentDraftPayloadProjection.Create(existingDto, "cap_existing").Value!;
     var patch = new AgentDraftPayloadPatchDto
     {
         Discriminator = DescriptorKind.Capability,
-        ChangedFields = new HashSet<Enum> { AgentCapabilityDraftChangedField.Name },
         Capability = new AgentCapabilityDraftPayloadPatchDto
         {
-            Name = "NewName"
-            // State, ContractHash 等未设置
+            Payload = existingDto.Capability! with { Name = "NewName" },
+            ChangedFields = AgentCapabilityDraftChangedField.Name
         }
     };
 
-    var result = AgentDraftPayloadProjection.Merge(existing, patch);
+    var result = AgentDraftPayloadProjection.Merge(patch, existingPayload);
 
-    result.Error.Should().BeNull();
-    result.Value.Should().NotBeNull();
-    result.Value.Name.Should().Be("NewName");           // 更新
-    result.Value.State.Should().Be(existing.State);      // 保留
-    result.Value.ContractHash.Should().Be(existing.ContractHash); // 保留
+    result.IsSuccess.Should().BeTrue();
+    var merged = AgentDraftPayloadProjection.FromDomain(result.Value!).Value!;
+    merged.Capability!.Name.Should().Be("NewName");
+    merged.Capability.State.Should().Be(existingDto.Capability!.State);
 }
 
 [Fact]
 public void Merge_empty_changed_fields_returns_ADPC004()
 {
-    var result = AgentDraftPayloadProjection.Merge(existing, new AgentDraftPayloadPatchDto
+    var existingDto = CreateSampleCapabilityPayload();
+    var existingPayload = AgentDraftPayloadProjection.Create(existingDto, "cap_existing").Value!;
+    var result = AgentDraftPayloadProjection.Merge(new AgentDraftPayloadPatchDto
     {
         Discriminator = DescriptorKind.Capability,
-        ChangedFields = new HashSet<Enum>(), // 空！
-        Capability = new AgentCapabilityDraftPayloadPatchDto()
-    });
+        Capability = new AgentCapabilityDraftPayloadPatchDto
+        {
+            Payload = existingDto.Capability!,
+            ChangedFields = default
+        }
+    }, existingPayload);
 
-    result.Error.Should().NotBeNull();
-    result.Error.Code.Should().Be("ADPC004"); // EmptyChangedFields
+    result.IsSuccess.Should().BeFalse();
+    result.Errors.Should().Contain(error =>
+        error.Code == AgentDraftContractErrorCodes.EmptyChangedFields);
 }
 ```
 
@@ -1404,43 +1412,53 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptor
 
 Activation 契约需显式引用 `CrestCreates.Agent.ControlPlane.Activation.Abstractions` 项目；CLR 命名空间保持 `CrestCreates.Agent.ControlPlane.Abstractions[.Activation]` 不变。
 
+以下假设 `reviewArtifact`、`reviewReport`、`packagePreview` 与 `evidencePreview` 已由正式审查/包预览工具生成并持久化。审查哈希只能从工件的原始 hash input 重算，不能从投影 DTO 猜测。
+
 ```csharp
+using System.Globalization;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using DraftHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
-// 从审查结果构建绑定快照
+var stableHashes = reviewArtifact.ReportInput.StableHashes
+    ?? throw new InvalidOperationException("Review artifact stable hashes are required.");
+var packageHashes = packagePreview.PackagePreview;
+var evidenceHashes = evidencePreview.PackagePreview;
+
 var bindingSnapshot = new ActivationBindingSnapshot
 {
-    TenantId = tenantId,
+    TenantId = draft.TenantId,
     DraftId = draft.DraftId,
-    ReviewResultId = reviewResult.ReviewResultId,
-    DraftVersion = draft.CurrentVersion,
+    ReviewResultId = reviewReport.ReviewResultId,
+    DraftVersion = int.Parse(reviewReport.DraftVersion, CultureInfo.InvariantCulture),
     ReportId = reviewReport.ReportId,
-    PackagePreviewId = packagePreview.PreviewId,     // required — 编译期强制
-    EvidencePreviewId = evidencePreview.PreviewId,   // required — 编译期强制
+    PackagePreviewId = packagePreview.PackagePreviewId,
+    EvidencePreviewId = evidencePreview.EvidencePreviewId,
     Hashes = new BindingHashes
     {
-        SourceReviewHash = reviewResult.StableHash,
-        ReviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewResult),
-        PackageManifestHash = packagePreview.PackageManifestHash,
-        PackageEvidenceHash = evidencePreview.PackageEvidenceHash,
-        PackageEvidenceEnvelopeHash = evidencePreview.PackageEvidenceEnvelopeHash,
-        ContractHash = draft.ContractHash,
-        DefinitionHash = draft.DefinitionHash
+        SourceReviewHash = reviewHashService.ComputeSourceReviewHash(reviewArtifact.OriginalHashInput),
+        ReviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewArtifact.OriginalHashInput),
+        PackageManifestHash = packageHashes.PackageManifestHash
+            ?? throw new InvalidOperationException("Package manifest hash is required."),
+        PackageEvidenceHash = evidenceHashes.PackageEvidenceHash
+            ?? throw new InvalidOperationException("Package evidence hash is required."),
+        PackageEvidenceEnvelopeHash = evidenceHashes.PackageEvidenceEnvelopeHash
+            ?? throw new InvalidOperationException("Package evidence envelope hash is required."),
+        ContractHash = stableHashes.ContractHash,
+        DefinitionHash = stableHashes.DefinitionHash
     },
-    CorrelationId = correlationId,
+    CorrelationId = draft.CorrelationId,
     CreatedAt = timeProvider.GetUtcNow()
 };
 
-// 治理决策从审查结果流向激活请求
+// ToolService 会从 ReviewResultId 对应的持久化审查工件读取治理决策，
+// 并覆盖请求中的 GovernanceDecision，因此这里不重复计算。
 var request = new SubmitActivationRequestRequest
 {
     DraftId = draft.DraftId,
-    BindingSnapshot = bindingSnapshot,
-    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
+    BindingSnapshot = bindingSnapshot
 };
 
-// 通过工具服务提交
 var result = await toolService.SubmitActivationRequestAsync(context, request, ct);
 if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
 {
@@ -1464,24 +1482,21 @@ if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
 
 ```
 ReviewDescriptorDraft
-  → DescriptorDraftReviewResult
-    → GovernanceDecision?.MaxDecision
-      → SubmitActivationRequestRequest.GovernanceDecision
+  → 持久化 AgentReviewArtifactEnvelope
+    → ReportInput.GovernanceMaxDecision
+      → ToolService 覆盖 SubmitActivationRequestRequest.GovernanceDecision
         → ActivationRequest.GovernanceDecision (快照固化)
 ```
 
-ToolService 在 `SubmitActivationRequestAsync` 内部提取决策：
+ToolService 在 `SubmitActivationRequestAsync` 内部按 `BindingSnapshot.ReviewResultId` 读取审查工件并提取决策：
 
 ```csharp
 // ToolService 内部逻辑（伪代码）
-var reviewResult = await ResolveReviewResultAsync(draftId);
-var request = new SubmitActivationRequestRequest
-{
-    DraftId = draftId,
-    BindingSnapshot = BuildBindingSnapshot(reviewResult, draft)
-    // ToolService 从已持久化审查工件读取治理决策并覆盖此字段；不信任调用方重复计算。
-};
-return await _requestService.SubmitAsync(request);
+var reviewRef = await _reviewArtifactStore.GetAsync(
+    context.TenantId, request.BindingSnapshot.ReviewResultId, ct);
+var governanceDecision = reviewRef?.ReportInput.GovernanceMaxDecision;
+var governedRequest = request with { GovernanceDecision = governanceDecision };
+return await _activationRequestService.CreateActivationRequestAsync(context, governedRequest, ct);
 ```
 
 ### 14.3 HumanTask 审查流程
