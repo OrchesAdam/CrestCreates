@@ -70,33 +70,51 @@ public class ControlPlaneManifestContractTests
             .ToHashSet();
     }
 
+    private static HashSet<Type> GetExpectedSurfaceRoots(string contextName)
+    {
+        var surfaces = contextName == ActivationContextName
+            ? new[] { typeof(IAgentControlPlaneToolService), typeof(IAgentToolManifestProvider) }
+            : new[] { typeof(IReadOnlyControlPlaneTools), typeof(IMutationControlPlaneTools), typeof(IAgentToolManifestProvider) };
+        var roots = new HashSet<Type>();
+
+        foreach (var surface in surfaces.SelectMany(type => new[] { type }.Concat(type.GetInterfaces())))
+        {
+            foreach (var method in surface.GetMethods())
+            {
+                AddSurfaceType(method.ReturnType, roots);
+                foreach (var parameter in method.GetParameters())
+                    AddSurfaceType(parameter.ParameterType, roots);
+            }
+        }
+
+        return roots;
+    }
+
+    private static void AddSurfaceType(Type type, HashSet<Type> roots)
+    {
+        if (type == typeof(Task) || type == typeof(CancellationToken) || type == typeof(AgentToolInvocationContext))
+            return;
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
+        {
+            AddSurfaceType(type.GetGenericArguments()[0], roots);
+            return;
+        }
+
+        roots.Add(type);
+    }
+
     [Theory]
     [MemberData(nameof(ContextNames))]
     public void GeneratedSurfaceRoots_MatchExpectedToolAndManifestSurfaces(string contextName)
     {
         var surfaceRoots = GetRootTypes(contextName, "SurfaceRootTypes");
+        var expectedRoots = GetExpectedSurfaceRoots(contextName);
 
-        surfaceRoots.Should().Contain(typeof(AgentToolDescriptor), "ListAgentTools returns IReadOnlyList<AgentToolDescriptor>");
-        surfaceRoots.Should().Contain(typeof(AgentToolResult<string>), "GetAgentToolDescriptor returns string tool name");
-        surfaceRoots.Should().Contain(typeof(DescriptorRef), "GetAgentToolDescriptor takes DescriptorRef parameter");
-        surfaceRoots.Should().Contain(typeof(ApplyFixProposalRequest), "ApplyFixProposal takes ApplyFixProposalRequest");
-        surfaceRoots.Should().Contain(typeof(DescriptorSearchRequest), "SearchDescriptors takes DescriptorSearchRequest");
-        surfaceRoots.Should().Contain(typeof(ExplainDiagnosticsRequest), "ExplainDiagnostics takes ExplainDiagnosticsRequest");
-        surfaceRoots.Should().Contain(typeof(CreateDescriptorDraftRequest), "CreateDescriptorDraft takes CreateDescriptorDraftRequest");
-        surfaceRoots.Should().Contain(typeof(UpdateDescriptorDraftRequest), "UpdateDescriptorDraft takes UpdateDescriptorDraftRequest");
-
-        if (contextName == ActivationContextName)
-        {
-            surfaceRoots.Should().Contain(typeof(SubmitActivationRequestRequest));
-            surfaceRoots.Should().Contain(typeof(AgentToolResult<ActivationRequest>));
-            surfaceRoots.Should().Contain(typeof(AgentToolResult<ActivationReadinessPreview>));
-        }
-        else
-        {
-            surfaceRoots.Should().NotContain(typeof(SubmitActivationRequestRequest));
-            surfaceRoots.Should().NotContain(typeof(AgentToolResult<ActivationRequest>));
-            surfaceRoots.Should().NotContain(typeof(AgentToolResult<ActivationReadinessPreview>));
-        }
+        surfaceRoots.Should().BeEquivalentTo(expectedRoots,
+            "the generated surface must cover every intended interface signature root and no others");
+        surfaceRoots.Should().Contain(typeof(AgentToolResult<PackageEvidencePreview>),
+            "BuildPackageEvidencePreview returns a package evidence result");
     }
 
     [Theory]

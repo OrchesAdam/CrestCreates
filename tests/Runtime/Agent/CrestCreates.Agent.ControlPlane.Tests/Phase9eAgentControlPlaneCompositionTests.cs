@@ -2,6 +2,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Localization.Services;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Agent.ControlPlane.Tests;
@@ -56,6 +57,49 @@ public sealed class Phase9eAgentControlPlaneCompositionTests
                     ["DiagnosticCount"] = "3"
                 })
             .Should().Be("Draft validation passed with 3 diagnostics.");
+    }
+
+    [Fact]
+    public void AddAgentControlPlane_Should_RegisterNarrowInterfacesAsFacadeAliases()
+    {
+        var services = new ServiceCollection();
+        services.AddAgentControlPlane();
+        var toolInterfaces = new[]
+        {
+            typeof(IReadOnlyControlPlaneTools),
+            typeof(IMutationControlPlaneTools),
+            typeof(IActivationControlPlaneTools)
+        };
+
+        foreach (var toolInterface in toolInterfaces)
+        {
+            services.Should().ContainSingle(descriptor =>
+                descriptor.ServiceType == toolInterface
+                && !descriptor.IsKeyedService
+                && descriptor.ImplementationFactory != null,
+                "the default composition must register an unkeyed facade alias for {0}", toolInterface.Name);
+        }
+    }
+
+    [Fact]
+    public void AddAgentControlPlane_Should_ResolveNarrowInterfacesAsFacadeAliases_AndPreserveHostOverrides()
+    {
+        var services = new ServiceCollection();
+        var readOnlyOverride = new Mock<IReadOnlyControlPlaneTools>().Object;
+        var facadeOverride = new Mock<IAgentControlPlaneToolService>().Object;
+        services.AddSingleton(readOnlyOverride);
+        services.AddSingleton(facadeOverride);
+        services.AddKeyedSingleton<IMutationControlPlaneTools>("keyed-only", new Mock<IMutationControlPlaneTools>().Object);
+        services.AddKeyedSingleton<IActivationControlPlaneTools>("keyed-only", new Mock<IActivationControlPlaneTools>().Object);
+        services.AddAgentControlPlane();
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IReadOnlyControlPlaneTools>().Should().BeSameAs(readOnlyOverride);
+        provider.GetRequiredService<IMutationControlPlaneTools>().Should().BeSameAs(facadeOverride);
+        provider.GetRequiredService<IActivationControlPlaneTools>().Should().BeSameAs(facadeOverride);
+        provider.GetRequiredKeyedService<IMutationControlPlaneTools>("keyed-only").Should().NotBeSameAs(facadeOverride);
+        provider.GetRequiredKeyedService<IActivationControlPlaneTools>("keyed-only").Should().NotBeSameAs(facadeOverride);
     }
 
     private sealed class KeyReturningLocalizationService(string currentCulture) : ILocalizationService

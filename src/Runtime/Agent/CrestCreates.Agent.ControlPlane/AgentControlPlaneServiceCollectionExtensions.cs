@@ -57,7 +57,18 @@ public static class AgentControlPlaneServiceCollectionExtensions
         AddActivationReviewConsumer(services);
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
+        AddToolInterfaceAlias<IReadOnlyControlPlaneTools>(services);
+        AddToolInterfaceAlias<IMutationControlPlaneTools>(services);
+        AddToolInterfaceAlias<IActivationControlPlaneTools>(services);
         return services;
+    }
+
+    private static void AddToolInterfaceAlias<TTool>(IServiceCollection services) where TTool : class
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(TTool) && !descriptor.IsKeyedService))
+            return;
+
+        services.AddSingleton<TTool>(sp => (TTool)sp.GetRequiredService<IAgentControlPlaneToolService>());
     }
 
     /// <summary>

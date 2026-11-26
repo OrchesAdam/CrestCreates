@@ -1,8 +1,9 @@
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 
 /// <summary>
-/// Activation handoff Control Plane tools — readiness preview, submit, query, and cancel activation requests.
-/// Aligned with <see cref="AgentToolAuthorizationMode"/>'s activation handoff tier.
+/// Activation-oriented Control Plane tools. Readiness preview remains a read-only
+/// PackagePreview tool; submit, query, and cancel use the activation handoff tier.
+/// All results on this interface require the Activation JSON context.
 /// </summary>
 public interface IActivationControlPlaneTools
 {

@@ -6,7 +6,7 @@
 
 ### 1.1 前置依赖
 
-read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。使用方式：
+read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。`BuildActivationReadinessPreview` 虽按只读 `PackagePreview` 授权，但其接口与结果属于 Activation 契约，序列化必须使用 Activation context。已编译的旧调用方需重新编译并引用新项目；本次拆分不提供类型转发。使用方式：
 
 ```csharp
 // 引入命名空间
@@ -105,10 +105,10 @@ public sealed record AgentToolResult<T> where T : class
 |--------|---------|---------------------------|
 | `CreateDescriptorDraft` | `CreateDescriptorDraftRequest` | `AgentDescriptorDraftDto` |
 | `UpdateDescriptorDraft` | `UpdateDescriptorDraftRequest` | `AgentDescriptorDraftDto` |
-| `GetDescriptorDraft` | `DescriptorRef` | `AgentDescriptorDraftDto` |
-| `ListDescriptorDrafts` | `DraftQuery` | `DescriptorDraftListResult` |
-| `CancelDescriptorDraft` | `DescriptorRef` | `AgentDescriptorDraftDto` |
-| `CompareDescriptorDraft` | `DescriptorRef` | `DraftComparisonResult` |
+| `GetDescriptorDraft` | `string draftId` | `AgentDescriptorDraftDto` |
+| `ListDescriptorDrafts` | `DraftQuery?` | `DescriptorDraftListResult` |
+| `CancelDescriptorDraft` | `string draftId` | `AgentDescriptorDraftDto` |
+| `CompareDescriptorDraft` | `string draftId` | `DraftComparisonResult` |
 
 **DraftComparisonResult** 包含：
 - `AgentDescriptorDraftDto Draft` — 草稿本体
@@ -119,10 +119,10 @@ public sealed record AgentToolResult<T> where T : class
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `ValidateDescriptorDraft` | `DescriptorRef` | `DescriptorDraftValidationResult` |
-| `ReviewDescriptorDraft` | `DescriptorRef` | `AgentReviewResultDto` |
-| `GetDraftReviewResult` | `DescriptorRef` | `AgentReviewResultDto` |
-| `ListDraftReviewResults` | (无请求参数) | `ReviewResultListResult` |
+| `ValidateDescriptorDraft` | `string draftId` | `DescriptorDraftValidationResult` |
+| `ReviewDescriptorDraft` | `string draftId` | `AgentReviewResultDto` |
+| `GetDraftReviewResult` | `string reviewResultId` | `AgentReviewResultDto` |
+| `ListDraftReviewResults` | `string? draftId` | `ReviewResultListResult` |
 | `ExplainDiagnostics` | `ExplainDiagnosticsRequest` | `DiagnosticExplanation` |
 
 **AgentReviewResultDto** 包含 6 个摘要子 DTO：
@@ -149,19 +149,19 @@ public sealed record AgentToolResult<T> where T : class
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `SuggestDescriptorDraftFixes` | `DescriptorRef` | `FixProposalListResult` |
-| `GetFixProposal` | `DescriptorRef` | `FixProposal` |
-| `ListFixProposals` | `DescriptorRef` | `FixProposalListResult` |
+| `SuggestDescriptorDraftFixes` | `string draftId` | `FixProposalListResult` |
+| `GetFixProposal` | `string proposalId` | `FixProposal` |
+| `ListFixProposals` | `string? draftId` | `FixProposalListResult` |
 | `ApplyFixProposalToDraft` | `ApplyFixProposalRequest` | `AgentDescriptorDraftDto` |
 
 ### 2.7 Wave 5 — Package Preview（4 tools）
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `PreviewDescriptorPackage` | `DescriptorRef` | `DescriptorPackagePreview` |
-| `BuildPackageEvidencePreview` | `DescriptorRef` | `PackageEvidencePreview` |
-| `BuildActivationReadinessPreview` | `DescriptorRef` | `ActivationReadinessPreview` |
-| `GetPackagePreview` | `DescriptorRef` | `DescriptorPackagePreview` |
+| `PreviewDescriptorPackage` | `string draftId` | `DescriptorPackagePreview` |
+| `BuildPackageEvidencePreview` | `string draftId` | `PackageEvidencePreview` |
+| `BuildActivationReadinessPreview` | `string draftId` | `ActivationReadinessPreview`（需 Activation JSON context） |
+| `GetPackagePreview` | `string previewId` | `DescriptorPackagePreview` |
 
 ### 2.8 Wave 6 — Activation Handoff（3 tools）
 
@@ -170,8 +170,8 @@ public sealed record AgentToolResult<T> where T : class
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
 | `SubmitActivationRequest` | `SubmitActivationRequestRequest` | `ActivationRequest` |
-| `GetActivationRequestStatus` | `DescriptorRef` | `ActivationRequest` |
-| `CancelActivationRequest` | `DescriptorRef` | `ActivationRequest` |
+| `GetActivationRequestStatus` | `string requestId` | `ActivationRequest` |
+| `CancelActivationRequest` | `string requestId` | `ActivationRequest` |
 
 **SubmitActivationRequestRequest** 新增字段：
 
@@ -180,7 +180,8 @@ public sealed record SubmitActivationRequestRequest
 {
     public required string DraftId { get; init; }
     public required ActivationBindingSnapshot BindingSnapshot { get; init; }
-    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; } // NEW in Phase 7e
+    public string? Rationale { get; init; }
+    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; }
 }
 ```
 
@@ -223,23 +224,31 @@ public sealed record BindingHashes
 public sealed record ActivationRequest
 {
     public required string RequestId { get; init; }
-    public required string DraftId { get; init; }
     public required string TenantId { get; init; }
+    public required string DraftId { get; init; }
     public required ActivationRequestStatus Status { get; init; }
+    public required DateTimeOffset SubmittedAt { get; init; }
+    public required string SubmittedBy { get; init; }
+    public required string CreatedByActorId { get; init; }
+    public required DescriptorActivationActorKind CreatedByActorKind { get; init; }
+    public required DescriptorLifecycleDecisionKind GovernanceDecision { get; init; }
+    public required DescriptorActivationEligibility Eligibility { get; init; }
+    public DescriptorActivationPolicy? Policy { get; init; }
     public required ActivationBindingSnapshot BindingSnapshot { get; init; }
-    public required DescriptorActivationPolicy Policy { get; init; }
-    public required DateTimeOffset CreatedAt { get; init; }
-    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; }
+    public IReadOnlyList<AgentToolDiagnostic>? Diagnostics { get; init; }
 }
 ```
 
-**ActivationRequestStatus** — 6 值状态枚举：
+**ActivationRequestStatus** — 9 值状态枚举：
 - `Submitted` — 已提交
 - `UnderReview` — 审查中（HumanTask 创建后自动转换）
 - `Approved` — 已批准（触发 RuntimeActivationGate）
+- `Activated` — 已激活
+- `ActivationFailed` — 激活失败
 - `Rejected` — 已拒绝（人工决策）
 - `Cancelled` — 请求者取消
 - `Expired` — 超时过期
+- `Stale` — 绑定证据发生漂移，需重新提交
 
 **激活工作流**：
 
