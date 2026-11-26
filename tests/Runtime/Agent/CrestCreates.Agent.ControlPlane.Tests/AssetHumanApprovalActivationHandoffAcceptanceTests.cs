@@ -171,6 +171,35 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
     }
 
     [Fact]
+    public async Task NarrowToolInterfaces_ShouldInvokeTheDefaultFacadePipeline()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var draft = ParseAssetCandidate();
+        await fixture.DraftStore.SaveAsync(draft);
+
+        var readTools = fixture.Services.GetRequiredService<IReadOnlyControlPlaneTools>();
+        var mutationTools = fixture.Services.GetRequiredService<IMutationControlPlaneTools>();
+        var activationTools = fixture.Services.GetRequiredService<IActivationControlPlaneTools>();
+
+        var read = await readTools.SearchDescriptorsAsync(
+            fixture.Context(AgentToolName.SearchDescriptors),
+            new DescriptorSearchRequest { NameContains = draft.DescriptorId });
+        read.Status.Should().Be(AgentToolResultStatus.Success,
+            string.Join(" | ", read.Diagnostics.Select(d => d.Message)));
+
+        var review = await mutationTools.ReviewDescriptorDraftAsync(
+            fixture.Context(AgentToolName.ReviewDescriptorDraft), draft.DraftId);
+        review.Status.Should().Be(AgentToolResultStatus.Success,
+            string.Join(" | ", review.Diagnostics.Select(d => d.Message)));
+
+        var readiness = await activationTools.BuildActivationReadinessPreviewAsync(
+            fixture.Context(AgentToolName.BuildActivationReadinessPreview), draft.DraftId);
+        readiness.Status.Should().Be(AgentToolResultStatus.Success,
+            string.Join(" | ", readiness.Diagnostics.Select(d => d.Message)));
+        readiness.Value!.DraftId.Should().Be(draft.DraftId);
+    }
+
+    [Fact]
     public async Task AssetCandidate_HumanApprove_CompletesThroughOutbox_AndActivates()
     {
         await using var fixture = await Fixture.CreateAsync();

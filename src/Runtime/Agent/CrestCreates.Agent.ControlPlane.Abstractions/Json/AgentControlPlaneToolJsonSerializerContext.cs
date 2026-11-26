@@ -1,7 +1,5 @@
 using System.Text.Json.Serialization;
-using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Core.Abstractions.Serialization;
-using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
@@ -10,13 +8,12 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonContractSurface(
-    typeof(IAgentControlPlaneToolService),
+    typeof(IReadOnlyControlPlaneTools),
+    ExcludedParameterTypes = new[] { typeof(AgentToolInvocationContext) })]
+[JsonContractSurface(
+    typeof(IMutationControlPlaneTools),
     ExcludedParameterTypes = new[] { typeof(AgentToolInvocationContext) })]
 [JsonContractSurface(typeof(IAgentToolManifestProvider))]
-
-// Direct serialization roots outside the marked tool surfaces.
-[JsonContractExplicitRoot(typeof(DescriptorActivationReviewDecision))]
-[JsonContractExplicitRoot(typeof(CanonicalHash))]
 public sealed partial class AgentControlPlaneToolJsonSerializerContext
     : JsonSerializerContext
 {

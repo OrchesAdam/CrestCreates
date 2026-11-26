@@ -10,7 +10,7 @@ public sealed record MetadataContextPackSummary
     public required IReadOnlyDictionary<RelationshipKind, int> RelationshipCountsByKind { get; init; }
     public required IReadOnlyList<DescriptorRef> FocusRefs { get; init; }
     public required bool WasTruncated { get; init; }
-    public required int? TruncatedAtCount { get; init; }
+    public int? TruncatedAtCount { get; init; }
     public required int TraversalDepthReached { get; init; }
 
     /// <summary>

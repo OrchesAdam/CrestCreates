@@ -6,7 +6,7 @@
 
 ### 1.1 前置依赖
 
-Phase 7c 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions` 项目。使用方式：
+read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。`BuildActivationReadinessPreviewAsync` 虽按只读 `PackagePreview` 授权，但已从 `IMutationControlPlaneTools` 移到 `IActivationControlPlaneTools`：旧调用方除引用新项目外，还必须把接收者类型改为 `IActivationControlPlaneTools`（或完整 `IAgentControlPlaneToolService`），其结果必须使用 Activation context 序列化。已编译的旧调用方需重新编译；本次拆分不提供类型转发。使用方式：
 
 ```csharp
 // 引入命名空间
@@ -17,47 +17,50 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 ### 1.2 获取 JSON 序列化选项
 
 ```csharp
-// 预配置的 JsonSerializerOptions，使用 Source Generator 注册
+// read/draft/review/package-preview：保留既有 PascalCase wire 格式
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
-// 等价于手工构造：
-var options = new JsonSerializerOptions
-{
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        AgentControlPlaneToolJsonSerializerContext.Default)
-};
+// 需要与生成 context 一致的 camelCase / 忽略 null 格式时显式使用：
+var contextAlignedOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
+
+// 完整工具面（含 Activation）：保留拆分前的 PascalCase / 显式 null wire 格式
+var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+
+// 需要与完整工具面生成 context 一致的 camelCase / 忽略 null 格式时显式使用：
+var activationContextAlignedOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned();
 ```
 
 ### 1.3 序列化示例
 
 ```csharp
-// 反序列化工具结果
-var result = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(json, options);
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
+using DescriptorDraft = CrestCreates.DescriptorDraft.Abstractions;
 
 // 序列化创建草稿请求
 var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
         Schema = new AgentSchemaDraftPayloadDto
         {
-            DescriptorRef = new DescriptorRef("default", "schema_blog_post"),
             Name = "BlogPost",
-            DisplayName = "Blog Post Schema",
-            State = "Active",
-            SchemaKind = "Evolutionary",
-            ContractHash = "abc123",
-            DefinitionHash = "def456",
+            State = DescriptorState.Active,
+            ChangeKind = SchemaChangeKind.Additive,
             Version = 1
         }
     }
 };
 
 var json = JsonSerializer.Serialize(request, options);
+
+// 反序列化同一请求
+var deserializedRequest = JsonSerializer.Deserialize<CreateDescriptorDraftRequest>(json, options);
 ```
 
 ---
@@ -102,10 +105,10 @@ public sealed record AgentToolResult<T> where T : class
 |--------|---------|---------------------------|
 | `CreateDescriptorDraft` | `CreateDescriptorDraftRequest` | `AgentDescriptorDraftDto` |
 | `UpdateDescriptorDraft` | `UpdateDescriptorDraftRequest` | `AgentDescriptorDraftDto` |
-| `GetDescriptorDraft` | `DescriptorRef` | `AgentDescriptorDraftDto` |
-| `ListDescriptorDrafts` | `DraftQuery` | `DescriptorDraftListResult` |
-| `CancelDescriptorDraft` | `DescriptorRef` | `AgentDescriptorDraftDto` |
-| `CompareDescriptorDraft` | `DescriptorRef` | `DraftComparisonResult` |
+| `GetDescriptorDraft` | `string draftId` | `AgentDescriptorDraftDto` |
+| `ListDescriptorDrafts` | `DraftQuery?` | `DescriptorDraftListResult` |
+| `CancelDescriptorDraft` | `string draftId` | `AgentDescriptorDraftDto` |
+| `CompareDescriptorDraft` | `string draftId` | `DraftComparisonResult` |
 
 **DraftComparisonResult** 包含：
 - `AgentDescriptorDraftDto Draft` — 草稿本体
@@ -116,10 +119,10 @@ public sealed record AgentToolResult<T> where T : class
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `ValidateDescriptorDraft` | `DescriptorRef` | `DescriptorDraftValidationResult` |
-| `ReviewDescriptorDraft` | `DescriptorRef` | `AgentReviewResultDto` |
-| `GetDraftReviewResult` | `DescriptorRef` | `AgentReviewResultDto` |
-| `ListDraftReviewResults` | (无请求参数) | `ReviewResultListResult` |
+| `ValidateDescriptorDraft` | `string draftId` | `DescriptorDraftValidationResult` |
+| `ReviewDescriptorDraft` | `string draftId` | `AgentReviewResultDto` |
+| `GetDraftReviewResult` | `string reviewResultId` | `AgentReviewResultDto` |
+| `ListDraftReviewResults` | `string? draftId` | `ReviewResultListResult` |
 | `ExplainDiagnostics` | `ExplainDiagnosticsRequest` | `DiagnosticExplanation` |
 
 **AgentReviewResultDto** 包含 6 个摘要子 DTO：
@@ -146,19 +149,19 @@ public sealed record AgentToolResult<T> where T : class
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `SuggestDescriptorDraftFixes` | `DescriptorRef` | `FixProposalListResult` |
-| `GetFixProposal` | `DescriptorRef` | `FixProposal` |
-| `ListFixProposals` | `DescriptorRef` | `FixProposalListResult` |
+| `SuggestDescriptorDraftFixes` | `string draftId` | `FixProposalListResult` |
+| `GetFixProposal` | `string proposalId` | `FixProposal` |
+| `ListFixProposals` | `string? draftId` | `FixProposalListResult` |
 | `ApplyFixProposalToDraft` | `ApplyFixProposalRequest` | `AgentDescriptorDraftDto` |
 
 ### 2.7 Wave 5 — Package Preview（4 tools）
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
-| `PreviewDescriptorPackage` | `DescriptorRef` | `DescriptorPackagePreview` |
-| `BuildPackageEvidencePreview` | `DescriptorRef` | `PackageEvidencePreview` |
-| `BuildActivationReadinessPreview` | `DescriptorRef` | `ActivationReadinessPreview` |
-| `GetPackagePreview` | `DescriptorRef` | `DescriptorPackagePreview` |
+| `PreviewDescriptorPackage` | `string draftId` | `DescriptorPackagePreview` |
+| `BuildPackageEvidencePreview` | `string draftId` | `PackageEvidencePreview` |
+| `BuildActivationReadinessPreview` | `string draftId` | `ActivationReadinessPreview`（需 Activation JSON context） |
+| `GetPackagePreview` | `string previewId` | `DescriptorPackagePreview` |
 
 ### 2.8 Wave 6 — Activation Handoff（3 tools）
 
@@ -167,8 +170,8 @@ public sealed record AgentToolResult<T> where T : class
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
 | `SubmitActivationRequest` | `SubmitActivationRequestRequest` | `ActivationRequest` |
-| `GetActivationRequestStatus` | `DescriptorRef` | `ActivationRequest` |
-| `CancelActivationRequest` | `DescriptorRef` | `ActivationRequest` |
+| `GetActivationRequestStatus` | `string requestId` | `ActivationRequest` |
+| `CancelActivationRequest` | `string requestId` | `ActivationRequest` |
 
 **SubmitActivationRequestRequest** 新增字段：
 
@@ -177,7 +180,8 @@ public sealed record SubmitActivationRequestRequest
 {
     public required string DraftId { get; init; }
     public required ActivationBindingSnapshot BindingSnapshot { get; init; }
-    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; } // NEW in Phase 7e
+    public string? Rationale { get; init; }
+    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; }
 }
 ```
 
@@ -220,23 +224,31 @@ public sealed record BindingHashes
 public sealed record ActivationRequest
 {
     public required string RequestId { get; init; }
-    public required string DraftId { get; init; }
     public required string TenantId { get; init; }
+    public required string DraftId { get; init; }
     public required ActivationRequestStatus Status { get; init; }
+    public required DateTimeOffset SubmittedAt { get; init; }
+    public required string SubmittedBy { get; init; }
+    public required string CreatedByActorId { get; init; }
+    public required DescriptorActivationActorKind CreatedByActorKind { get; init; }
+    public required DescriptorLifecycleDecisionKind GovernanceDecision { get; init; }
+    public required DescriptorActivationEligibility Eligibility { get; init; }
+    public DescriptorActivationPolicy? Policy { get; init; }
     public required ActivationBindingSnapshot BindingSnapshot { get; init; }
-    public required DescriptorActivationPolicy Policy { get; init; }
-    public required DateTimeOffset CreatedAt { get; init; }
-    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; }
+    public IReadOnlyList<AgentToolDiagnostic>? Diagnostics { get; init; }
 }
 ```
 
-**ActivationRequestStatus** — 6 值状态枚举：
+**ActivationRequestStatus** — 9 值状态枚举：
 - `Submitted` — 已提交
 - `UnderReview` — 审查中（HumanTask 创建后自动转换）
 - `Approved` — 已批准（触发 RuntimeActivationGate）
+- `Activated` — 已激活
+- `ActivationFailed` — 激活失败
 - `Rejected` — 已拒绝（人工决策）
 - `Cancelled` — 请求者取消
 - `Expired` — 超时过期
+- `Stale` — 绑定证据发生漂移，需重新提交
 
 **激活工作流**：
 
@@ -276,25 +288,28 @@ public sealed record ActivationRequest
 每个描述符类型有对应的子 record。以下是 6 种负载构造示例：
 
 ```csharp
+using System;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Schema.Abstractions;
+
 // Capability
 var capabilityPayload = new AgentDraftPayloadDto
 {
     Discriminator = DescriptorKind.Capability,
     Capability = new AgentCapabilityDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "cap_process_order"),
         Name = "ProcessOrder",
-        DisplayName = "Process Order",
-        State = "Active",
-        CapabilityKind = "Automation",
-        Categories = new[] { "order", "payment" },
-        Produces = new[] { new DescriptorRef("event", "order_processed") },
-        Consumes = new[] { new DescriptorRef("event", "order_placed") },
-        InputSchema = new DescriptorRef("schema", "order_input"),
-        OutputSchema = new DescriptorRef("schema", "order_output"),
-        RiskLevel = "Low",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        CapabilityKind = CapabilityKind.Command,
+        RiskLevel = CapabilityRiskLevel.Low,
+        InputSchema = new DescriptorRef("default", "schema_order_input"),
+        OutputSchema = new DescriptorRef("default", "schema_order_output"),
+        Produces = [new DescriptorRef("default", "evt_order_processed")],
+        Consumes = [new DescriptorRef("default", "evt_order_placed")],
         Version = 1
     }
 };
@@ -305,13 +320,9 @@ var workflowPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Workflow,
     Workflow = new AgentWorkflowDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "wf_order_fulfillment"),
         Name = "OrderFulfillment",
-        DisplayName = "Order Fulfillment Workflow",
-        State = "Active",
-        VariableSchema = new DescriptorRef("schema", "wf_variables"),
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        VariableSchema = new DescriptorRef("default", "schema_workflow_variables"),
         Version = 1
     }
 };
@@ -322,17 +333,13 @@ var humanTaskPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.HumanTask,
     HumanTask = new AgentHumanTaskDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "ht_review_order"),
         Name = "ReviewOrder",
-        DisplayName = "Review Order",
-        State = "Active",
-        AssignmentStrategy = "RoundRobin",
-        InputSchema = new DescriptorRef("schema", "review_input"),
-        OutputSchema = new DescriptorRef("schema", "review_output"),
-        Interaction = new DescriptorRef("form", "review_form"),
-        Timeout = "01:00:00",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        AssigneeStrategy = AssigneeStrategy.RoundRobin,
+        Interaction = new DescriptorRef("default", "form_review"),
+        InputSchema = new DescriptorRef("default", "schema_review_input"),
+        OutputSchema = new DescriptorRef("default", "schema_review_output"),
+        Timeout = TimeSpan.FromHours(1).ToString(),
         Version = 1
     }
 };
@@ -343,13 +350,9 @@ var formPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Form,
     Form = new AgentFormDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "form_review"),
         Name = "ReviewForm",
-        DisplayName = "Review Form",
-        State = "Active",
-        FormSchema = new DescriptorRef("schema", "form_structure"),
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        FormSchema = new DescriptorRef("default", "schema_form_structure"),
         Version = 1
     }
 };
@@ -360,17 +363,13 @@ var eventPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Event,
     Event = new AgentEventDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "evt_order_placed"),
         Name = "OrderPlaced",
-        DisplayName = "Order Placed",
-        State = "Active",
-        EventKind = "Business",
-        EventType = "Notification",
-        PayloadSchema = new DescriptorRef("schema", "event_payload"),
-        Importance = "Normal",
-        ChangeKind = "Evolutionary",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        Category = EventCategory.Domain,
+        Semantic = EventSemantic.Fact,
+        Importance = EventImportance.Business,
+        ChangeKind = SchemaChangeKind.Additive,
+        PayloadSchema = new DescriptorRef("default", "schema_event_payload"),
         Version = 1
     }
 };
@@ -381,13 +380,9 @@ var schemaPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Schema,
     Schema = new AgentSchemaDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "schema_blog_post"),
         Name = "BlogPost",
-        DisplayName = "Blog Post Schema",
-        State = "Active",
-        SchemaKind = "Evolutionary",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        ChangeKind = SchemaChangeKind.Additive,
         Version = 1
     }
 };
@@ -424,37 +419,37 @@ var valid = new AgentDraftPayloadDto
 
 ### 3.3 AgentDraftPayloadPatchDto — 构造 Update 负载
 
-> **New in #42**：Update 操作使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`。Patch DTO 所有字段均为 nullable，配合 `ChangedFields` 枚举实现字段级合并。
+> **New in #42**：Update 操作使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`。外层只选择描述符类型；每个子 Patch 同时提供完整 `Payload` 和强类型 `ChangedFields` 标志。未标记字段在 Merge 时保留现有值。
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+
+// existingCapability / existingWorkflow 是当前 Agent*DraftPayloadDto 值。
 // Capability Update 示例 — 只更新 Name 和 State
 var capabilityPatch = new AgentDraftPayloadPatchDto
 {
     Discriminator = DescriptorKind.Capability,
-    ChangedFields = new HashSet<Enum>
-    {
-        AgentCapabilityDraftChangedField.Name,
-        AgentCapabilityDraftChangedField.State
-    },
     Capability = new AgentCapabilityDraftPayloadPatchDto
     {
-        Name = "UpdatedCapability",
-        State = "Active"
-        // DescriptorRef, ContractHash 等未设置 → 在 Merge 中保留现有值
+        Payload = existingCapability with
+        {
+            Name = "UpdatedCapability",
+            State = DescriptorState.Active
+        },
+        ChangedFields = AgentCapabilityDraftChangedField.Name
+            | AgentCapabilityDraftChangedField.State
     }
 };
 
-// Workflow Update 示例 — 清除 InputSchema
+// Workflow Update 示例 — 清除 VariableSchema
 var workflowPatch = new AgentDraftPayloadPatchDto
 {
     Discriminator = DescriptorKind.Workflow,
-    ChangedFields = new HashSet<Enum>
-    {
-        AgentWorkflowDraftChangedField.InputSchema
-    },
     Workflow = new AgentWorkflowDraftPayloadPatchDto
     {
-        InputSchema = null  // 显式置空
+        Payload = existingWorkflow with { VariableSchema = null },
+        ChangedFields = AgentWorkflowDraftChangedField.VariableSchema
     }
 };
 ```
@@ -480,31 +475,49 @@ var workflowPatch = new AgentDraftPayloadPatchDto
 ```csharp
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
-// 方式一：通过工厂获取预配置选项
+// 方式一：通过工厂获取兼容旧载荷的预配置选项
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
-// 方式二：手动组合（例如与项目的其他 JsonContext 合并）
-var options = new JsonSerializerOptions
-{
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        AgentControlPlaneToolJsonSerializerContext.Default,
-        MyProjectJsonSerializerContext.Default)
-};
+// 方式二：从根 context 配置开始，再与其他 JsonContext 合并
+// 该格式为 camelCase / 忽略 null，与 CreateDefault 的旧 wire 格式不同
+var combinedOptions = new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
+combinedOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
+    AgentControlPlaneToolJsonSerializerContext.Default,
+    MyProjectJsonSerializerContext.Default);
+
+// 完整工具面：使用 Activation context，不要从根 context 推断激活契约
+var activationOptions = new JsonSerializerOptions(AgentControlPlaneActivationJsonSerializerContext.Default.Options);
+activationOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
+    AgentControlPlaneActivationJsonSerializerContext.Default,
+    MyProjectJsonSerializerContext.Default);
 ```
 
 ### 4.2 完整序列化/反序列化示例
 
 ```csharp
+using System;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
+using DescriptorDraft = CrestCreates.DescriptorDraft.Abstractions;
+
 // ── 序列化 ──
 var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
-        Schema = new AgentSchemaDraftPayloadDto { Name = "BlogPost", ... }
+        Schema = new AgentSchemaDraftPayloadDto
+        {
+            Name = "BlogPost",
+            State = DescriptorState.Active,
+            ChangeKind = SchemaChangeKind.Additive,
+            Version = 1
+        }
     }
 };
 
@@ -514,24 +527,41 @@ string json = JsonSerializer.Serialize(request, options);
 var deserialized = JsonSerializer.Deserialize<CreateDescriptorDraftRequest>(json, options);
 
 // ── 工具结果反序列化 ──
-var resultJson = """{"status":"Success","value":{"draftId":"...","descriptorKind":"Schema",...},"diagnostics":[]}""";
-var result = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options);
-
-if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
+// 使用同一工厂生成完整 JSON；枚举默认按数值序列化，不填写字符串枚举名
+var draftDto = new AgentDescriptorDraftDto
 {
-    var dto = result.Value;
-    Console.WriteLine($"Draft {dto.DraftId} for descriptor {dto.DescriptorId}");
+    TenantId = "tenant-1",
+    DraftId = "draft-1",
+    DescriptorKind = DescriptorKind.Schema,
+    DescriptorId = "schema_blog_post",
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
+    AuthorKind = DescriptorDraft.DescriptorDraftAuthorKind.Agent,
+    AuthorId = "agent-1",
+    CreatedAt = DateTimeOffset.UtcNow,
+    Payload = request.Payload
+};
+var result = AgentToolResult<AgentDescriptorDraftDto>.Success(draftDto);
+var resultJson = JsonSerializer.Serialize(result, options);
+var roundTrippedResult = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options)
+    ?? throw new InvalidOperationException("Deserialized draft result was null.");
+
+if (roundTrippedResult.Status == AgentToolResultStatus.Success && roundTrippedResult.Value is not null)
+{
+    var resultDto = roundTrippedResult.Value;
+    Console.WriteLine($"Draft {resultDto.DraftId} for descriptor {resultDto.DescriptorId}");
 }
 ```
 
 ### 4.3 已注册的类型
 
-`AgentControlPlaneToolJsonSerializerContext` 注册了以下类型族：
+`AgentControlPlaneToolJsonSerializerContext` 只注册 read/draft/review/package-preview 类型族：
 
-- **所有 Root DTO** — `AgentDescriptorDraftDto`、`AgentDraftPayloadDto`、6 个子 payload DTO、`DescriptorSummaryDto`、`AgentReviewResultDto`、6 个摘要 DTO
-- **所有请求/结果类型** — `CreateDescriptorDraftRequest`、`UpdateDescriptorDraftRequest`、`DescriptorSearchRequest`、`ExplainDiagnosticsRequest`、`ApplyFixProposalRequest`、`SubmitActivationRequestRequest`
-- **所有稳定值对象** — `DescriptorRef`、`DescriptorKind`、`DescriptorState`、`RelationshipKind`、`DescriptorStableHashes`、`DescriptorRelationship`
-- **所有基础类型** — `AgentToolResult<T>`、`AgentToolResultStatus`、`AgentToolDiagnostic`、`DraftDifference`、`FixProposalAction`、`ActivationRequestStatus`、`AgentToolDescriptor`、`AgentToolCategory`、`AgentToolActorKind` 等
+- **Root DTO** — `AgentDescriptorDraftDto`、`AgentDraftPayloadDto`、6 个子 payload DTO、`DescriptorSummaryDto`、`AgentReviewResultDto`、6 个摘要 DTO
+- **请求/结果类型** — `CreateDescriptorDraftRequest`、`UpdateDescriptorDraftRequest`、`DescriptorSearchRequest`、`ExplainDiagnosticsRequest`、`ApplyFixProposalRequest`
+- **稳定值对象** — `DescriptorRef`、`DescriptorKind`、`DescriptorState`、`RelationshipKind`、`DescriptorStableHashes`、`DescriptorRelationship`
+- **基础类型** — `AgentToolResult<T>`、`AgentToolResultStatus`、`AgentToolDiagnostic`、`DraftDifference`、`FixProposalAction`、`AgentToolDescriptor`、`AgentToolCategory`、`AgentToolActorKind` 等
+
+`AgentControlPlaneActivationJsonSerializerContext` 注册完整工具门面，并额外拥有 `SubmitActivationRequestRequest`、`AgentToolResult<ActivationRequest>`、`AgentToolResult<ActivationReadinessPreview>`、`DescriptorActivationReviewDecision` 与 `CanonicalHash` 根。根 context 不注册任何 Activation 程序集类型。
 
 ---
 
@@ -809,14 +839,19 @@ public void all_32_tools_are_registered_in_manifest()
 [Fact]
 public void all_tool_request_types_are_in_json_context()
 {
-    // 通过反射检查 JsonSerializable 特性覆盖了所有请求/结果类型
-    var contextType = typeof(AgentControlPlaneToolJsonSerializerContext);
-    var serializables = contextType.GetCustomAttributes<JsonSerializableAttribute>();
-    serializables.Select(a => a.Type)
+    // 根 context 覆盖 read/draft/review/package-preview
+    var rootContextType = typeof(AgentControlPlaneToolJsonSerializerContext);
+    var rootSerializables = rootContextType.GetCustomAttributes<JsonSerializableAttribute>();
+    rootSerializables.Select(a => a.Type)
         .Should().Contain(typeof(CreateDescriptorDraftRequest))
-        .And.Contain(typeof(UpdateDescriptorDraftRequest))
-        // ... 验证所有 32 个工具的类型
-        ;
+        .And.Contain(typeof(UpdateDescriptorDraftRequest));
+
+    // 完整工具面与 Activation 契约由激活 context 覆盖
+    var activationContextType = typeof(AgentControlPlaneActivationJsonSerializerContext);
+    var activationSerializables = activationContextType.GetCustomAttributes<JsonSerializableAttribute>();
+    activationSerializables.Select(a => a.Type)
+        .Should().Contain(typeof(CreateDescriptorDraftRequest))
+        .And.Contain(typeof(SubmitActivationRequestRequest));
 }
 ```
 
@@ -825,42 +860,50 @@ public void all_tool_request_types_are_in_json_context()
 验证 Patch Merge 的字段级合并语义：
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Agent.DraftContracts.Projection;
+
 [Fact]
 public void Merge_only_updates_changed_fields()
 {
-    var existing = CreateSampleCapabilityPayload();
+    var existingDto = CreateSampleCapabilityPayload();
+    var existingPayload = AgentDraftPayloadProjection.Create(existingDto, "cap_existing").Value!;
     var patch = new AgentDraftPayloadPatchDto
     {
         Discriminator = DescriptorKind.Capability,
-        ChangedFields = new HashSet<Enum> { AgentCapabilityDraftChangedField.Name },
         Capability = new AgentCapabilityDraftPayloadPatchDto
         {
-            Name = "NewName"
-            // State, ContractHash 等未设置
+            Payload = existingDto.Capability! with { Name = "NewName" },
+            ChangedFields = AgentCapabilityDraftChangedField.Name
         }
     };
 
-    var result = AgentDraftPayloadProjection.Merge(existing, patch);
+    var result = AgentDraftPayloadProjection.Merge(patch, existingPayload);
 
-    result.Error.Should().BeNull();
-    result.Value.Should().NotBeNull();
-    result.Value.Name.Should().Be("NewName");           // 更新
-    result.Value.State.Should().Be(existing.State);      // 保留
-    result.Value.ContractHash.Should().Be(existing.ContractHash); // 保留
+    result.IsSuccess.Should().BeTrue();
+    var merged = AgentDraftPayloadProjection.FromDomain(result.Value!).Value!;
+    merged.Capability!.Name.Should().Be("NewName");
+    merged.Capability.State.Should().Be(existingDto.Capability!.State);
 }
 
 [Fact]
 public void Merge_empty_changed_fields_returns_ADPC004()
 {
-    var result = AgentDraftPayloadProjection.Merge(existing, new AgentDraftPayloadPatchDto
+    var existingDto = CreateSampleCapabilityPayload();
+    var existingPayload = AgentDraftPayloadProjection.Create(existingDto, "cap_existing").Value!;
+    var result = AgentDraftPayloadProjection.Merge(new AgentDraftPayloadPatchDto
     {
         Discriminator = DescriptorKind.Capability,
-        ChangedFields = new HashSet<Enum>(), // 空！
-        Capability = new AgentCapabilityDraftPayloadPatchDto()
-    });
+        Capability = new AgentCapabilityDraftPayloadPatchDto
+        {
+            Payload = existingDto.Capability!,
+            ChangedFields = default
+        }
+    }, existingPayload);
 
-    result.Error.Should().NotBeNull();
-    result.Error.Code.Should().Be("ADPC004"); // EmptyChangedFields
+    result.IsSuccess.Should().BeFalse();
+    result.Errors.Should().Contain(error =>
+        error.Code == AgentDraftContractErrorCodes.EmptyChangedFields);
 }
 ```
 
@@ -1367,50 +1410,69 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptor
 
 ### 14.1 提交激活请求
 
+Activation 契约需显式引用 `CrestCreates.Agent.ControlPlane.Activation.Abstractions` 项目；CLR 命名空间保持 `CrestCreates.Agent.ControlPlane.Abstractions[.Activation]` 不变。
+
+以下假设 `reviewArtifact`、`reviewReport`、`packagePreview` 与 `evidencePreview` 已由正式审查/包预览工具生成并持久化。审查哈希只能从工件的原始 hash input 重算，不能从投影 DTO 猜测。
+
 ```csharp
+using System.Globalization;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using DraftHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
-// 从审查结果构建绑定快照
+var stableHashes = reviewArtifact.ReportInput.StableHashes
+    ?? throw new InvalidOperationException("Review artifact stable hashes are required.");
+var packageHashes = packagePreview.PackagePreview;
+var evidenceHashes = evidencePreview.PackagePreview;
+
 var bindingSnapshot = new ActivationBindingSnapshot
 {
-    TenantId = tenantId,
+    TenantId = draft.TenantId,
     DraftId = draft.DraftId,
-    ReviewResultId = reviewResult.ReviewResultId,
-    DraftVersion = draft.CurrentVersion,
+    ReviewResultId = reviewReport.ReviewResultId,
+    DraftVersion = int.Parse(reviewReport.DraftVersion, CultureInfo.InvariantCulture),
     ReportId = reviewReport.ReportId,
-    PackagePreviewId = packagePreview.PreviewId,     // required — 编译期强制
-    EvidencePreviewId = evidencePreview.PreviewId,   // required — 编译期强制
+    PackagePreviewId = packagePreview.PackagePreviewId,
+    EvidencePreviewId = evidencePreview.EvidencePreviewId,
     Hashes = new BindingHashes
     {
-        SourceReviewHash = reviewResult.StableHash,
-        ReviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewResult),
-        PackageManifestHash = packagePreview.PackageManifestHash,
-        PackageEvidenceHash = evidencePreview.PackageEvidenceHash,
-        PackageEvidenceEnvelopeHash = evidencePreview.PackageEvidenceEnvelopeHash,
-        ContractHash = draft.ContractHash,
-        DefinitionHash = draft.DefinitionHash
+        SourceReviewHash = reviewHashService.ComputeSourceReviewHash(reviewArtifact.OriginalHashInput),
+        ReviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewArtifact.OriginalHashInput),
+        PackageManifestHash = packageHashes.PackageManifestHash
+            ?? throw new InvalidOperationException("Package manifest hash is required."),
+        PackageEvidenceHash = evidenceHashes.PackageEvidenceHash
+            ?? throw new InvalidOperationException("Package evidence hash is required."),
+        PackageEvidenceEnvelopeHash = evidenceHashes.PackageEvidenceEnvelopeHash
+            ?? throw new InvalidOperationException("Package evidence envelope hash is required."),
+        ContractHash = stableHashes.ContractHash,
+        DefinitionHash = stableHashes.DefinitionHash
     },
-    CorrelationId = correlationId,
+    CorrelationId = draft.CorrelationId,
     CreatedAt = timeProvider.GetUtcNow()
 };
 
-// 治理决策从审查结果流向激活请求
+// ToolService 会从 ReviewResultId 对应的持久化审查工件读取治理决策，
+// 并覆盖请求中的 GovernanceDecision，因此这里不重复计算。
 var request = new SubmitActivationRequestRequest
 {
     DraftId = draft.DraftId,
-    BindingSnapshot = bindingSnapshot,
-    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
+    BindingSnapshot = bindingSnapshot
 };
 
-// 通过工具服务提交
 var result = await toolService.SubmitActivationRequestAsync(context, request, ct);
 if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
 {
     var activationRequest = result.Value;
     Console.WriteLine($"Activation request {activationRequest.RequestId} submitted");
     Console.WriteLine($"Status: {activationRequest.Status}"); // Submitted → UnderReview
-    Console.WriteLine($"Policy: {activationRequest.Policy.PolicySummary}");
+    if (activationRequest.Policy is { } policy)
+    {
+        Console.WriteLine($"Policy: requireHumanReview={policy.RequireHumanReviewForAll}, forbidSelfApproval={policy.ForbidSelfApproval}");
+    }
+    else
+    {
+        Console.WriteLine("Policy: not captured");
+    }
 }
 ```
 
@@ -1420,24 +1482,21 @@ if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
 
 ```
 ReviewDescriptorDraft
-  → DescriptorDraftReviewResult
-    → GovernanceDecision?.MaxDecision
-      → SubmitActivationRequestRequest.GovernanceDecision
+  → 持久化 AgentReviewArtifactEnvelope
+    → ReportInput.GovernanceMaxDecision
+      → ToolService 覆盖 SubmitActivationRequestRequest.GovernanceDecision
         → ActivationRequest.GovernanceDecision (快照固化)
 ```
 
-ToolService 在 `SubmitActivationRequestAsync` 内部提取决策：
+ToolService 在 `SubmitActivationRequestAsync` 内部按 `BindingSnapshot.ReviewResultId` 读取审查工件并提取决策：
 
 ```csharp
 // ToolService 内部逻辑（伪代码）
-var reviewResult = await ResolveReviewResultAsync(draftId);
-var request = new SubmitActivationRequestRequest
-{
-    DraftId = draftId,
-    BindingSnapshot = BuildBindingSnapshot(reviewResult, draft),
-    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
-};
-return await _requestService.SubmitAsync(request);
+var reviewRef = await _reviewArtifactStore.GetAsync(
+    context.TenantId, request.BindingSnapshot.ReviewResultId, ct);
+var governanceDecision = reviewRef?.ReportInput.GovernanceMaxDecision;
+var governedRequest = request with { GovernanceDecision = governanceDecision };
+return await _activationRequestService.CreateActivationRequestAsync(context, governedRequest, ct);
 ```
 
 ### 14.3 HumanTask 审查流程
@@ -1586,22 +1645,17 @@ else
 自我审批使用激活请求创建时捕获的策略快照：
 
 ```csharp
-// request.Policy 在 SubmitAsync 时捕获 — 不是实时查询
-if (request.Policy.AllowSelfApproval)
+// 正式 RequestService 完成状态、证据与人工审查校验后，优先使用创建时捕获的策略；
+// request.Policy 为 null 时才按当前 tenant 与 snapshot.Owner.DescriptorKind 查询。
+var policy = request.Policy
+    ?? await _policyProvider.GetPolicyAsync(context.TenantId, snapshot.Owner?.DescriptorKind, ct);
+
+// 仅当策略禁止且申请人与审批人的 ActorId 相同时拒绝；ActorKind 变化不构成不同身份。
+if (policy.ForbidSelfApproval
+    && string.Equals(request.CreatedByActorId, reviewDecision.ActorId, StringComparison.Ordinal))
 {
-    // 允许相同 ActorId 的审批
-}
-else if (request.Policy.ForbidSelfApproval)
-{
-    // 拒绝自我审批 → Block audit action
-    var reason = $"Self-approval forbidden by policy: {request.Policy.PolicySummary}";
-}
-else
-{
-    // 回退策略：使用 snapshot.Owner.DescriptorKind 查询
-    var fallbackPolicy = await _policyProvider.GetPolicyAsync(
-        request.TenantId,
-        request.BindingSnapshot.Owner?.DescriptorKind ?? DescriptorKind.Unknown);
+    // 拒绝自我审批 → Block audit action，并返回 SelfApprovalForbidden 诊断
+    var reason = $"Self-approval forbidden by policy: actorId={reviewDecision.ActorId}, requireHumanReview={policy.RequireHumanReviewForAll}";
 }
 ```
 

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
@@ -55,9 +56,33 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
         AddActivationReviewConsumer(services);
-        services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
-            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
+        TryAddAgentControlPlaneToolService(services, options);
+        AddToolInterfaceAlias<IReadOnlyControlPlaneTools, ReadOnlyControlPlaneToolsForwarder>(services);
+        AddToolInterfaceAlias<IMutationControlPlaneTools, MutationControlPlaneToolsForwarder>(services);
+        AddToolInterfaceAlias<IActivationControlPlaneTools, ActivationControlPlaneToolsForwarder>(services);
         return services;
+    }
+
+    private static void TryAddAgentControlPlaneToolService(
+        IServiceCollection services,
+        AgentToolAuthorizationOptions options)
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IAgentControlPlaneToolService) && !descriptor.IsKeyedService))
+            return;
+
+        services.AddSingleton<IAgentControlPlaneToolService>(sp =>
+            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
+    }
+
+    private static void AddToolInterfaceAlias<TTool,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TForwarder>(IServiceCollection services)
+        where TTool : class
+        where TForwarder : class, TTool
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(TTool) && !descriptor.IsKeyedService))
+            return;
+
+        services.AddTransient(typeof(TTool), typeof(TForwarder));
     }
 
     /// <summary>

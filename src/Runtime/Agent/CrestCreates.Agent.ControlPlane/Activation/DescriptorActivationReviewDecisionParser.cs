@@ -41,7 +41,7 @@ public static class DescriptorActivationReviewDecisionParser
             try
             {
                 decision = jsonElement.Deserialize(
-                    AgentControlPlaneToolJsonSerializerContext.Default.DescriptorActivationReviewDecision);
+                    AgentControlPlaneActivationJsonSerializerContext.Default.DescriptorActivationReviewDecision);
                 if (decision is not null)
                     return true;
             }
@@ -114,7 +114,7 @@ public static class DescriptorActivationReviewDecisionParser
                 return false;
             }
             var boundEvidenceHash = evidenceHashElement!.Value.Deserialize(
-                AgentControlPlaneToolJsonSerializerContext.Default.CanonicalHash);
+                AgentControlPlaneActivationJsonSerializerContext.Default.CanonicalHash);
             if (boundEvidenceHash is null)
             {
                 error = "Failed to deserialize 'BoundEvidenceHash' CanonicalHash.";
@@ -128,7 +128,7 @@ public static class DescriptorActivationReviewDecisionParser
                 return false;
             }
             var boundEnvelopeHash = envelopeHashElement!.Value.Deserialize(
-                AgentControlPlaneToolJsonSerializerContext.Default.CanonicalHash);
+                AgentControlPlaneActivationJsonSerializerContext.Default.CanonicalHash);
             if (boundEnvelopeHash is null)
             {
                 error = "Failed to deserialize 'BoundEnvelopeHash' CanonicalHash.";

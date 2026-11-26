@@ -22,8 +22,11 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Localization.Services;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.ContextPack;
+using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
@@ -65,11 +68,13 @@ public static class ControlPlaneJsonContractFixtureRunner
 
         try
         {
-            var context = AgentControlPlaneToolJsonSerializerContext.Default;
-            var options = context.Options;
+            var rootContext = AgentControlPlaneToolJsonSerializerContext.Default;
+            var context = AgentControlPlaneActivationJsonSerializerContext.Default;
+            var contextOptions = new[] { rootContext.Options, context.Options };
 
-            var reflectionFallbackDisabled = options.TypeInfoResolver is not DefaultJsonTypeInfoResolver
-                && !options.TypeInfoResolverChain.Any(resolver => resolver is DefaultJsonTypeInfoResolver);
+            var reflectionFallbackDisabled = contextOptions.All(options =>
+                options.TypeInfoResolver is not DefaultJsonTypeInfoResolver
+                && !options.TypeInfoResolverChain.Any(resolver => resolver is DefaultJsonTypeInfoResolver));
 
             if (!reflectionFallbackDisabled)
             {
@@ -80,14 +85,79 @@ public static class ControlPlaneJsonContractFixtureRunner
             Console.WriteLine($"ReflectionFallback_IsDisabled:{(reflectionFallbackDisabled ? "PASS" : "FAIL")}");
 
             bool allPassed = true;
+            var searchRequest = new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 };
+            var toolResult = AgentToolResult<string>.Success("hello-aot");
+            var sourceReviewHash = FixtureHash with { Value = "source-review-aot" };
+            var reviewManifestHash = FixtureHash with { Value = "review-manifest-aot" };
+            var packageManifestHash = FixtureHash with { Value = "package-manifest-aot" };
+            var packageEvidenceHash = FixtureHash with { Value = "package-evidence-aot" };
+            var packageEvidenceEnvelopeHash = FixtureHash with { Value = "package-evidence-envelope-aot" };
+            var contractHash = FixtureHash with { Value = "contract-aot" };
+            var definitionHash = FixtureHash with { Value = "definition-aot" };
+            var submitActivationRequest = new SubmitActivationRequestRequest
+            {
+                DraftId = "draft-aot",
+                Rationale = "native activation contract round-trip",
+                GovernanceDecision = DescriptorLifecycleDecisionKind.ReviewRequired,
+                BindingSnapshot = new ActivationBindingSnapshot
+                {
+                    TenantId = "tenant-aot",
+                    DraftId = "draft-aot",
+                    DraftVersion = 7,
+                    ReviewResultId = "review-aot",
+                    ReportId = "report-aot",
+                    PackagePreviewId = "package-aot",
+                    EvidencePreviewId = "evidence-aot",
+                    CorrelationId = "correlation-aot",
+                    CreatedAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero),
+                    Hashes = new BindingHashes
+                    {
+                        SourceReviewHash = sourceReviewHash,
+                        ReviewManifestHash = reviewManifestHash,
+                        PackageManifestHash = packageManifestHash,
+                        PackageEvidenceHash = packageEvidenceHash,
+                        PackageEvidenceEnvelopeHash = packageEvidenceEnvelopeHash,
+                        ContractHash = contractHash,
+                        DefinitionHash = definitionHash
+                    }
+                }
+            };
 
-            allPassed &= RoundTrip<DescriptorSearchRequest>(
-                new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 },
-                "DescriptorSearchRequest");
+            var rootRepresentativeRootsPassed =
+                RoundTrip(searchRequest, "DescriptorSearchRequest/Root", rootContext, value =>
+                    value.NameContains == "test-query" && value.MaxResults == 10)
+                & RoundTrip(toolResult, "AgentToolResult<string>/Root", rootContext, value =>
+                    value.Status == AgentToolResultStatus.Success && value.Value == "hello-aot");
+            allPassed &= rootRepresentativeRootsPassed;
+            Console.WriteLine($"RootContext_RepresentativeRoots:{(rootRepresentativeRootsPassed ? "PASS" : "FAIL")}");
 
-            allPassed &= RoundTrip<AgentToolResult<string>>(
-                AgentToolResult<string>.Success("hello-aot"),
-                "AgentToolResult<string>");
+            var activationRepresentativeRootsPassed =
+                RoundTrip(searchRequest, "DescriptorSearchRequest/Activation", context, value =>
+                    value.NameContains == "test-query" && value.MaxResults == 10)
+                & RoundTrip(toolResult, "AgentToolResult<string>/Activation", context, value =>
+                    value.Status == AgentToolResultStatus.Success && value.Value == "hello-aot")
+                & RoundTrip(submitActivationRequest, "SubmitActivationRequestRequest/Activation", context, value =>
+                    value.DraftId == "draft-aot"
+                    && value.Rationale == "native activation contract round-trip"
+                    && value.GovernanceDecision == DescriptorLifecycleDecisionKind.ReviewRequired
+                    && value.BindingSnapshot.TenantId == "tenant-aot"
+                    && value.BindingSnapshot.DraftId == "draft-aot"
+                    && value.BindingSnapshot.DraftVersion == 7
+                    && value.BindingSnapshot.ReviewResultId == "review-aot"
+                    && value.BindingSnapshot.ReportId == "report-aot"
+                    && value.BindingSnapshot.PackagePreviewId == "package-aot"
+                    && value.BindingSnapshot.EvidencePreviewId == "evidence-aot"
+                    && value.BindingSnapshot.CorrelationId == "correlation-aot"
+                    && value.BindingSnapshot.CreatedAt == new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero)
+                    && value.BindingSnapshot.Hashes.SourceReviewHash == sourceReviewHash
+                    && value.BindingSnapshot.Hashes.ReviewManifestHash == reviewManifestHash
+                    && value.BindingSnapshot.Hashes.PackageManifestHash == packageManifestHash
+                    && value.BindingSnapshot.Hashes.PackageEvidenceHash == packageEvidenceHash
+                    && value.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash == packageEvidenceEnvelopeHash
+                    && value.BindingSnapshot.Hashes.ContractHash == contractHash
+                    && value.BindingSnapshot.Hashes.DefinitionHash == definitionHash);
+            allPassed &= activationRepresentativeRootsPassed;
+            Console.WriteLine($"ActivationContext_RepresentativeRoots:{(activationRepresentativeRootsPassed ? "PASS" : "FAIL")}");
 
             allPassed &= RoundTrip<DescriptorActivationReviewDecision>(
                 new DescriptorActivationReviewDecision
@@ -103,9 +173,10 @@ public static class ControlPlaneJsonContractFixtureRunner
                     BoundEvidenceHash = FixtureHash,
                     BoundEnvelopeHash = FixtureHash
                 },
-                "DescriptorActivationReviewDecision");
+                "DescriptorActivationReviewDecision",
+                context);
 
-            allPassed &= RoundTrip<CanonicalHash>(FixtureHash, "CanonicalHash");
+            allPassed &= RoundTrip(FixtureHash, "CanonicalHash", context);
 
             var localizedCatalog = new DefaultDescriptorReviewMessageTemplateCatalog(
                 new KeyReturningLocalizationService("zh-CN"),
@@ -126,22 +197,82 @@ public static class ControlPlaneJsonContractFixtureRunner
             else
                 Console.Error.WriteLine($"FAIL: localized descriptor-governance message was '{localizedMessage}'.");
 
-            bool unregisteredTypeRejected = false;
-            try
+            var unregisteredTypeRejected = new JsonSerializerContext[] { rootContext, context }.All(serializerContext =>
             {
-                var unregisteredTypeInfo = context.GetTypeInfo(typeof(System.Net.Http.HttpClient));
-                unregisteredTypeRejected = unregisteredTypeInfo is null;
-            }
-            catch (NotSupportedException)
-            {
-                unregisteredTypeRejected = true;
-            }
+                try
+                {
+                    return serializerContext.GetTypeInfo(typeof(System.Net.Http.HttpClient)) is null;
+                }
+                catch (NotSupportedException)
+                {
+                    return true;
+                }
+            });
 
             if (!unregisteredTypeRejected)
             {
                 Console.Error.WriteLine("FAIL: Unregistered type resolved — fail-closed violated.");
                 allPassed = false;
             }
+
+            var rootActivationRejected = rootContext.GetTypeInfo(typeof(ActivationRequest)) is null;
+            allPassed &= rootActivationRejected;
+            Console.WriteLine($"RootContext_ActivationRejected:{(rootActivationRejected ? "PASS" : "FAIL")}");
+            if (!rootActivationRejected)
+            {
+                Console.Error.WriteLine("FAIL: root context resolved an Activation contract.");
+            }
+
+            var contextPackWithoutTruncation = CreateContextPack(null);
+            var contextPackWithTruncation = CreateContextPack(3);
+            var readiness = new ActivationReadinessPreview
+            {
+                DraftId = "draft-readiness-aot",
+                TenantId = "tenant-aot",
+                IsReady = false,
+                Blockers =
+                [
+                    new ActivationReadinessBlocker
+                    {
+                        Code = new DiagnosticCode("REVIEW_REQUIRED"),
+                        Message = "Human review is required.",
+                        Severity = SeverityLevel.Blocker,
+                        Remedy = "Complete the review."
+                    }
+                ],
+                Diagnostics = [],
+                ReviewResultId = "review-aot",
+                PackagePreviewId = "package-aot"
+            };
+            var rootOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
+            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned();
+            var publicFactoryRootsPassed =
+                RoundTrip(searchRequest, "LegacySearchRequest/RootFactory",
+                    AgentControlPlaneToolJsonSerializerOptions.CreateDefault(), value =>
+                        value.NameContains == "test-query" && value.MaxResults == 10)
+                & RoundTrip(contextPackWithoutTruncation, "ContextPack/NullTruncation/RootFactory", rootOptions, value =>
+                    value.Summary.TruncatedAtCount is null && value.Summary.TotalDescriptorCount == 1)
+                & RoundTrip(contextPackWithTruncation, "ContextPack/Truncated/RootFactory", rootOptions, value =>
+                    value.Summary.TruncatedAtCount == 3 && value.Summary.WasTruncated)
+                & RoundTrip(AgentToolResult<MetadataContextPack>.Success(contextPackWithoutTruncation),
+                    "ContextPackResult/RootFactory", rootOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.Summary.TruncatedAtCount is null)
+                & RoundTrip(AgentToolResult<MetadataContextPack>.Success(contextPackWithTruncation),
+                    "ContextPackResult/ActivationFactory", activationOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.Summary.TruncatedAtCount == 3)
+                & RoundTrip(AgentToolResult<ActivationReadinessPreview>.Success(readiness),
+                    "ActivationReadinessResult/ActivationFactory", activationOptions, value =>
+                        value.Status == AgentToolResultStatus.Success
+                        && value.Value!.DraftId == "draft-readiness-aot"
+                        && !value.Value.IsReady
+                        && value.Value.ReviewResultId == "review-aot"
+                        && value.Value.PackagePreviewId == "package-aot"
+                        && value.Value.Blockers.Single().Remedy == "Complete the review.");
+            allPassed &= publicFactoryRootsPassed;
+            Console.WriteLine($"PublicSerializerFactories_RepresentativeRoots:{(publicFactoryRootsPassed ? "PASS" : "FAIL")}");
+            allPassed &= RunLegacyFactoryWireFormats();
 
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
@@ -737,20 +868,119 @@ public static class ControlPlaneJsonContractFixtureRunner
         public object? GetService(Type serviceType) => null;
     }
 
-    private static bool RoundTrip<T>(T value, string label) where T : notnull
+    private static MetadataContextPack CreateContextPack(int? truncatedAtCount) => new()
+    {
+        Request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = [new DescriptorRef("test", "descriptor-aot", 1)]
+        },
+        Descriptors =
+        [
+            new MetadataContextPackDescriptorEntry
+            {
+                Ref = new DescriptorRef("test", "descriptor-aot", 1),
+                Kind = DescriptorKind.Capability,
+                Name = "Descriptor AOT",
+                State = DescriptorState.Active
+            }
+        ],
+        Relationships = [],
+        Summary = new MetadataContextPackSummary
+        {
+            TotalDescriptorCount = 1,
+            DescriptorCountsByKind = new Dictionary<DescriptorKind, int> { [DescriptorKind.Capability] = 1 },
+            TotalRelationshipCount = 0,
+            RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(),
+            FocusRefs = [new DescriptorRef("test", "descriptor-aot", 1)],
+            WasTruncated = truncatedAtCount is not null,
+            TruncatedAtCount = truncatedAtCount,
+            TraversalDepthReached = 1
+        },
+        Diagnostics = []
+    };
+
+    private static bool RunLegacyFactoryWireFormats()
     {
         try
         {
-            var context = AgentControlPlaneToolJsonSerializerContext.Default;
-            var json = JsonSerializer.Serialize(value, typeof(T), context);
-            var deserialized = JsonSerializer.Deserialize(json, typeof(T), context);
+            var rootOptions = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+            var rootTypeInfo = (JsonTypeInfo<DescriptorSearchRequest>)rootOptions.GetTypeInfo(typeof(DescriptorSearchRequest));
+            var rootJson = JsonSerializer.Serialize(
+                new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 },
+                rootTypeInfo);
+            const string expectedRootJson = """
+                {"Namespace":null,"Kind":null,"NameContains":"test-query","State":null,"MaxResults":10}
+                """;
+            if (rootJson != expectedRootJson)
+            {
+                Console.Error.WriteLine($"FAIL [LegacyRootFactoryWire]: {rootJson}");
+                return false;
+            }
+
+            const string legacyActivationJson = """
+                {"DraftId":"d","BindingSnapshot":{"TenantId":"t","DraftId":"d","DraftVersion":7,"ReviewResultId":"r","ReportId":null,"PackagePreviewId":"p","EvidencePreviewId":"e","Hashes":{"SourceReviewHash":{"Value":"s","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ReviewManifestHash":{"Value":"r","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageManifestHash":{"Value":"p","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceHash":{"Value":"e","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceEnvelopeHash":{"Value":"x","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ContractHash":{"Value":"c","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"DefinitionHash":{"Value":"d","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"}},"CorrelationId":null,"CreatedAt":"2026-01-02T03:04:05+00:00"},"Rationale":null,"GovernanceDecision":null}
+                """;
+            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+            var activationTypeInfo = (JsonTypeInfo<SubmitActivationRequestRequest>)activationOptions.GetTypeInfo(typeof(SubmitActivationRequestRequest));
+            var request = JsonSerializer.Deserialize(legacyActivationJson, activationTypeInfo);
+            if (request is null || request.DraftId != "d" || request.BindingSnapshot.Hashes.DefinitionHash.Value != "d")
+            {
+                Console.Error.WriteLine("FAIL [LegacyActivationFactoryPayload]: values did not match.");
+                return false;
+            }
+
+            var activationJson = JsonSerializer.Serialize(request, activationTypeInfo);
+            if (!activationJson.Contains("\"DraftId\":\"d\"", StringComparison.Ordinal)
+                || !activationJson.Contains("\"Rationale\":null", StringComparison.Ordinal)
+                || activationJson.Contains("\"draftId\"", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"FAIL [LegacyActivationFactoryWire]: {activationJson}");
+                return false;
+            }
+
+            Console.WriteLine("LegacyFactoryWireFormats:PASS");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [LegacyFactoryWireFormats]: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool RoundTrip<T>(
+        T value,
+        string label,
+        JsonSerializerContext context,
+        Func<T, bool>? verify = null) where T : notnull =>
+        RoundTrip(value, label, (JsonSerializerOptions)context.Options, verify);
+
+    private static bool RoundTrip<T>(
+        T value,
+        string label,
+        JsonSerializerOptions options,
+        Func<T, bool>? verify = null) where T : notnull
+    {
+        try
+        {
+            var typeInfo = (JsonTypeInfo<T>)options.GetTypeInfo(typeof(T));
+            var json = JsonSerializer.Serialize(value, typeInfo);
+            var deserialized = JsonSerializer.Deserialize(json, typeInfo);
             if (deserialized is null)
             {
                 Console.Error.WriteLine($"FAIL [{label}]: deserialized null.");
                 return false;
             }
 
-            var reJson = JsonSerializer.Serialize(deserialized, typeof(T), context);
+            var typedValue = (T)deserialized;
+            if (verify is not null && !verify(typedValue))
+            {
+                Console.Error.WriteLine($"FAIL [{label}]: deserialized values did not match.");
+                return false;
+            }
+
+            var reJson = JsonSerializer.Serialize(deserialized, typeInfo);
             if (json != reJson)
             {
                 Console.Error.WriteLine($"FAIL [{label}]: round-trip mismatch.");
