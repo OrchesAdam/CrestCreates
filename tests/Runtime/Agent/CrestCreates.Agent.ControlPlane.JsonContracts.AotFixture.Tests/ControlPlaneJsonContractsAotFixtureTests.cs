@@ -24,6 +24,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
         "RootContext_RepresentativeRoots",
         "ActivationContext_RepresentativeRoots",
         "PublicSerializerFactories_RepresentativeRoots",
+        "LegacyFactoryWireFormats",
         "RootContext_ActivationRejected",
         "AgentDraftIdentityBinding",
         "ReviewHashInputSourceGeneratedRoundTrip",

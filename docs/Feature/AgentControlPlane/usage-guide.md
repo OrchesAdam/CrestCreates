@@ -36,13 +36,14 @@ var activationContextAlignedOptions = AgentControlPlaneActivationJsonSerializerO
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
+using DescriptorDraft = CrestCreates.DescriptorDraft.Abstractions;
 
 // 序列化创建草稿请求
 var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
@@ -287,25 +288,28 @@ public sealed record ActivationRequest
 每个描述符类型有对应的子 record。以下是 6 种负载构造示例：
 
 ```csharp
+using System;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Schema.Abstractions;
+
 // Capability
 var capabilityPayload = new AgentDraftPayloadDto
 {
     Discriminator = DescriptorKind.Capability,
     Capability = new AgentCapabilityDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "cap_process_order"),
         Name = "ProcessOrder",
-        DisplayName = "Process Order",
-        State = "Active",
-        CapabilityKind = "Automation",
-        Categories = new[] { "order", "payment" },
-        Produces = new[] { new DescriptorRef("event", "order_processed") },
-        Consumes = new[] { new DescriptorRef("event", "order_placed") },
-        InputSchema = new DescriptorRef("schema", "order_input"),
-        OutputSchema = new DescriptorRef("schema", "order_output"),
-        RiskLevel = "Low",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        CapabilityKind = CapabilityKind.Command,
+        RiskLevel = CapabilityRiskLevel.Low,
+        InputSchema = new DescriptorRef("default", "schema_order_input"),
+        OutputSchema = new DescriptorRef("default", "schema_order_output"),
+        Produces = [new DescriptorRef("default", "evt_order_processed")],
+        Consumes = [new DescriptorRef("default", "evt_order_placed")],
         Version = 1
     }
 };
@@ -316,13 +320,9 @@ var workflowPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Workflow,
     Workflow = new AgentWorkflowDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "wf_order_fulfillment"),
         Name = "OrderFulfillment",
-        DisplayName = "Order Fulfillment Workflow",
-        State = "Active",
-        VariableSchema = new DescriptorRef("schema", "wf_variables"),
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        VariableSchema = new DescriptorRef("default", "schema_workflow_variables"),
         Version = 1
     }
 };
@@ -333,17 +333,13 @@ var humanTaskPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.HumanTask,
     HumanTask = new AgentHumanTaskDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "ht_review_order"),
         Name = "ReviewOrder",
-        DisplayName = "Review Order",
-        State = "Active",
-        AssignmentStrategy = "RoundRobin",
-        InputSchema = new DescriptorRef("schema", "review_input"),
-        OutputSchema = new DescriptorRef("schema", "review_output"),
-        Interaction = new DescriptorRef("form", "review_form"),
-        Timeout = "01:00:00",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        AssigneeStrategy = AssigneeStrategy.RoundRobin,
+        Interaction = new DescriptorRef("default", "form_review"),
+        InputSchema = new DescriptorRef("default", "schema_review_input"),
+        OutputSchema = new DescriptorRef("default", "schema_review_output"),
+        Timeout = TimeSpan.FromHours(1).ToString(),
         Version = 1
     }
 };
@@ -354,13 +350,9 @@ var formPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Form,
     Form = new AgentFormDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "form_review"),
         Name = "ReviewForm",
-        DisplayName = "Review Form",
-        State = "Active",
-        FormSchema = new DescriptorRef("schema", "form_structure"),
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        FormSchema = new DescriptorRef("default", "schema_form_structure"),
         Version = 1
     }
 };
@@ -371,17 +363,13 @@ var eventPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Event,
     Event = new AgentEventDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "evt_order_placed"),
         Name = "OrderPlaced",
-        DisplayName = "Order Placed",
-        State = "Active",
-        EventKind = "Business",
-        EventType = "Notification",
-        PayloadSchema = new DescriptorRef("schema", "event_payload"),
-        Importance = "Normal",
-        ChangeKind = "Evolutionary",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        Category = EventCategory.Domain,
+        Semantic = EventSemantic.Fact,
+        Importance = EventImportance.Business,
+        ChangeKind = SchemaChangeKind.Additive,
+        PayloadSchema = new DescriptorRef("default", "schema_event_payload"),
         Version = 1
     }
 };
@@ -392,13 +380,9 @@ var schemaPayload = new AgentDraftPayloadDto
     Discriminator = DescriptorKind.Schema,
     Schema = new AgentSchemaDraftPayloadDto
     {
-        DescriptorRef = new DescriptorRef("default", "schema_blog_post"),
         Name = "BlogPost",
-        DisplayName = "Blog Post Schema",
-        State = "Active",
-        SchemaKind = "Evolutionary",
-        ContractHash = "abc",
-        DefinitionHash = "def",
+        State = DescriptorState.Active,
+        ChangeKind = SchemaChangeKind.Additive,
         Version = 1
     }
 };
@@ -511,12 +495,19 @@ activationOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
 ### 4.2 完整序列化/反序列化示例
 
 ```csharp
+using System;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
+using DescriptorDraft = CrestCreates.DescriptorDraft.Abstractions;
+
 // ── 序列化 ──
 var request = new CreateDescriptorDraftRequest
 {
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
@@ -543,15 +534,16 @@ var draftDto = new AgentDescriptorDraftDto
     DraftId = "draft-1",
     DescriptorKind = DescriptorKind.Schema,
     DescriptorId = "schema_blog_post",
-    Operation = DescriptorDraft.Abstractions.DescriptorDraftOperation.Create,
-    AuthorKind = DescriptorDraft.Abstractions.DescriptorDraftAuthorKind.Agent,
+    Operation = DescriptorDraft.DescriptorDraftOperation.Create,
+    AuthorKind = DescriptorDraft.DescriptorDraftAuthorKind.Agent,
     AuthorId = "agent-1",
     CreatedAt = DateTimeOffset.UtcNow,
     Payload = request.Payload
 };
 var result = AgentToolResult<AgentDescriptorDraftDto>.Success(draftDto);
 var resultJson = JsonSerializer.Serialize(result, options);
-var roundTrippedResult = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options);
+var roundTrippedResult = JsonSerializer.Deserialize<AgentToolResult<AgentDescriptorDraftDto>>(resultJson, options)
+    ?? throw new InvalidOperationException("Deserialized draft result was null.");
 
 if (roundTrippedResult.Status == AgentToolResultStatus.Success && roundTrippedResult.Value is not null)
 {
@@ -1486,8 +1478,8 @@ var reviewResult = await ResolveReviewResultAsync(draftId);
 var request = new SubmitActivationRequestRequest
 {
     DraftId = draftId,
-    BindingSnapshot = BuildBindingSnapshot(reviewResult, draft),
-    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
+    BindingSnapshot = BuildBindingSnapshot(reviewResult, draft)
+    // ToolService 从已持久化审查工件读取治理决策并覆盖此字段；不信任调用方重复计算。
 };
 return await _requestService.SubmitAsync(request);
 ```
@@ -1638,16 +1630,17 @@ else
 自我审批使用激活请求创建时捕获的策略快照：
 
 ```csharp
-// request.Policy 在 SubmitAsync 时捕获 — 不是实时查询；可能未捕获策略
-var policy = request.Policy;
-if (policy is { ForbidSelfApproval: true })
+// 正式 RequestService 完成状态、证据与人工审查校验后，优先使用创建时捕获的策略；
+// request.Policy 为 null 时才按当前 tenant 与 snapshot.Owner.DescriptorKind 查询。
+var policy = request.Policy
+    ?? await _policyProvider.GetPolicyAsync(context.TenantId, snapshot.Owner?.DescriptorKind, ct);
+
+// 仅当策略禁止且申请人与审批人的 ActorId 相同时拒绝；ActorKind 变化不构成不同身份。
+if (policy.ForbidSelfApproval
+    && string.Equals(request.CreatedByActorId, reviewDecision.ActorId, StringComparison.Ordinal))
 {
-    // 拒绝自我审批 → Block audit action
-    var reason = $"Self-approval forbidden by policy: requireHumanReview={policy.RequireHumanReviewForAll}, forbidSelfApproval={policy.ForbidSelfApproval}";
-}
-else
-{
-    // 未禁止自我审批时，继续执行治理决策与人工审批规则
+    // 拒绝自我审批 → Block audit action，并返回 SelfApprovalForbidden 诊断
+    var reason = $"Self-approval forbidden by policy: actorId={reviewDecision.ActorId}, requireHumanReview={policy.RequireHumanReviewForAll}";
 }
 ```
 
