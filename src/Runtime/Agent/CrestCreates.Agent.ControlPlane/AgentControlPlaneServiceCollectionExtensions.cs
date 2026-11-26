@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
@@ -56,9 +57,9 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
         AddActivationReviewConsumer(services);
         TryAddAgentControlPlaneToolService(services, options);
-        AddToolInterfaceAlias<IReadOnlyControlPlaneTools>(services);
-        AddToolInterfaceAlias<IMutationControlPlaneTools>(services);
-        AddToolInterfaceAlias<IActivationControlPlaneTools>(services);
+        AddToolInterfaceAlias<IReadOnlyControlPlaneTools, ReadOnlyControlPlaneToolsForwarder>(services);
+        AddToolInterfaceAlias<IMutationControlPlaneTools, MutationControlPlaneToolsForwarder>(services);
+        AddToolInterfaceAlias<IActivationControlPlaneTools, ActivationControlPlaneToolsForwarder>(services);
         return services;
     }
 
@@ -73,12 +74,15 @@ public static class AgentControlPlaneServiceCollectionExtensions
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
     }
 
-    private static void AddToolInterfaceAlias<TTool>(IServiceCollection services) where TTool : class
+    private static void AddToolInterfaceAlias<TTool,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TForwarder>(IServiceCollection services)
+        where TTool : class
+        where TForwarder : class, TTool
     {
         if (services.Any(descriptor => descriptor.ServiceType == typeof(TTool) && !descriptor.IsKeyedService))
             return;
 
-        services.AddTransient(typeof(TTool), typeof(ControlPlaneToolInterfaceForwarder));
+        services.AddTransient(typeof(TTool), typeof(TForwarder));
     }
 
     /// <summary>

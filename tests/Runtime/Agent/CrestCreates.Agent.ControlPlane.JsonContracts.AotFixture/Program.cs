@@ -245,7 +245,7 @@ public static class ControlPlaneJsonContractFixtureRunner
                 PackagePreviewId = "package-aot"
             };
             var rootOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
-            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned();
             var publicFactoryRootsPassed =
                 RoundTrip(searchRequest, "LegacySearchRequest/RootFactory",
                     AgentControlPlaneToolJsonSerializerOptions.CreateDefault(), value =>
@@ -272,6 +272,7 @@ public static class ControlPlaneJsonContractFixtureRunner
                         && value.Value.Blockers.Single().Remedy == "Complete the review.");
             allPassed &= publicFactoryRootsPassed;
             Console.WriteLine($"PublicSerializerFactories_RepresentativeRoots:{(publicFactoryRootsPassed ? "PASS" : "FAIL")}");
+            allPassed &= RunLegacyFactoryWireFormats();
 
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
@@ -898,6 +899,55 @@ public static class ControlPlaneJsonContractFixtureRunner
         },
         Diagnostics = []
     };
+
+    private static bool RunLegacyFactoryWireFormats()
+    {
+        try
+        {
+            var rootOptions = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+            var rootTypeInfo = (JsonTypeInfo<DescriptorSearchRequest>)rootOptions.GetTypeInfo(typeof(DescriptorSearchRequest));
+            var rootJson = JsonSerializer.Serialize(
+                new DescriptorSearchRequest { NameContains = "test-query", MaxResults = 10 },
+                rootTypeInfo);
+            const string expectedRootJson = """
+                {"Namespace":null,"Kind":null,"NameContains":"test-query","State":null,"MaxResults":10}
+                """;
+            if (rootJson != expectedRootJson)
+            {
+                Console.Error.WriteLine($"FAIL [LegacyRootFactoryWire]: {rootJson}");
+                return false;
+            }
+
+            const string legacyActivationJson = """
+                {"DraftId":"d","BindingSnapshot":{"TenantId":"t","DraftId":"d","DraftVersion":7,"ReviewResultId":"r","ReportId":null,"PackagePreviewId":"p","EvidencePreviewId":"e","Hashes":{"SourceReviewHash":{"Value":"s","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ReviewManifestHash":{"Value":"r","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageManifestHash":{"Value":"p","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceHash":{"Value":"e","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceEnvelopeHash":{"Value":"x","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ContractHash":{"Value":"c","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"DefinitionHash":{"Value":"d","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"}},"CorrelationId":null,"CreatedAt":"2026-01-02T03:04:05+00:00"},"Rationale":null,"GovernanceDecision":null}
+                """;
+            var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+            var activationTypeInfo = (JsonTypeInfo<SubmitActivationRequestRequest>)activationOptions.GetTypeInfo(typeof(SubmitActivationRequestRequest));
+            var request = JsonSerializer.Deserialize(legacyActivationJson, activationTypeInfo);
+            if (request is null || request.DraftId != "d" || request.BindingSnapshot.Hashes.DefinitionHash.Value != "d")
+            {
+                Console.Error.WriteLine("FAIL [LegacyActivationFactoryPayload]: values did not match.");
+                return false;
+            }
+
+            var activationJson = JsonSerializer.Serialize(request, activationTypeInfo);
+            if (!activationJson.Contains("\"DraftId\":\"d\"", StringComparison.Ordinal)
+                || !activationJson.Contains("\"Rationale\":null", StringComparison.Ordinal)
+                || activationJson.Contains("\"draftId\"", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"FAIL [LegacyActivationFactoryWire]: {activationJson}");
+                return false;
+            }
+
+            Console.WriteLine("LegacyFactoryWireFormats:PASS");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [LegacyFactoryWireFormats]: {ex.Message}");
+            return false;
+        }
+    }
 
     private static bool RoundTrip<T>(
         T value,

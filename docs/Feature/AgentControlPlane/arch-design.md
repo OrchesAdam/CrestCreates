@@ -135,7 +135,8 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  Root / Activation JsonSerializerOptions                 │    │
-│  │  CreateDefault() → source-generated context resolver      │    │
+│  │  CreateDefault() → legacy wire + generated resolver      │
+│  │  CreateContextAligned() → generated context options      │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
@@ -232,7 +233,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentControlPlaneToolJsonSerializerContext` | ControlPlane.Abstractions/Json | Source-generated JSON 序列化上下文，注册 read/draft/review/package-preview Root DTO + 稳定值对象 | **Implemented** |
 | `AgentControlPlaneToolJsonSerializerOptions` | ControlPlane.Abstractions/Json | 根工具面 `CreateDefault()` 保留旧 wire；`CreateContextAligned()` 对齐生成 context | **Implemented** |
 | `AgentControlPlaneActivationJsonSerializerContext` | ControlPlane.Activation.Abstractions/Json | 完整工具门面、Activation DTO 与决策/hash 显式根 | **Implemented (#57)** |
-| `AgentControlPlaneActivationJsonSerializerOptions` | ControlPlane.Activation.Abstractions/Json | 完整工具面 `CreateDefault()` / `CreateContextAligned()` 均对齐生成 context | **Implemented (#57)** |
+| `AgentControlPlaneActivationJsonSerializerOptions` | ControlPlane.Activation.Abstractions/Json | 完整工具面 `CreateDefault()` 保留旧 wire；`CreateContextAligned()` 对齐生成 context | **Implemented (#57)** |
 | `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7e.v1"` | **Implemented** |
 | `AgentToolDescriptor.ContractVersion` | Abstractions | 工具描述符上的契约版本字段 | **Implemented** |
 | `AgentToolName` | Abstractions | 32 个工具名称常量 | **Implemented** |

@@ -23,13 +23,20 @@ var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 // 需要与生成 context 一致的 camelCase / 忽略 null 格式时显式使用：
 var contextAlignedOptions = AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned();
 
-// 完整工具面（含 Activation）：显式引用 Activation.Abstractions
+// 完整工具面（含 Activation）：保留拆分前的 PascalCase / 显式 null wire 格式
 var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+
+// 需要与完整工具面生成 context 一致的 camelCase / 忽略 null 格式时显式使用：
+var activationContextAlignedOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned();
 ```
 
 ### 1.3 序列化示例
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
+
 // 序列化创建草稿请求
 var request = new CreateDescriptorDraftRequest
 {
@@ -41,13 +48,9 @@ var request = new CreateDescriptorDraftRequest
         Discriminator = DescriptorKind.Schema,
         Schema = new AgentSchemaDraftPayloadDto
         {
-            DescriptorRef = new DescriptorRef("default", "schema_blog_post"),
             Name = "BlogPost",
-            DisplayName = "Blog Post Schema",
-            State = "Active",
-            SchemaKind = "Evolutionary",
-            ContractHash = "abc123",
-            DefinitionHash = "def456",
+            State = DescriptorState.Active,
+            ChangeKind = SchemaChangeKind.Additive,
             Version = 1
         }
     }
@@ -517,7 +520,13 @@ var request = new CreateDescriptorDraftRequest
     Payload = new AgentDraftPayloadDto
     {
         Discriminator = DescriptorKind.Schema,
-        Schema = new AgentSchemaDraftPayloadDto { Name = "BlogPost", ... }
+        Schema = new AgentSchemaDraftPayloadDto
+        {
+            Name = "BlogPost",
+            State = DescriptorState.Active,
+            ChangeKind = SchemaChangeKind.Additive,
+            Version = 1
+        }
     }
 };
 
@@ -1446,7 +1455,14 @@ if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
     var activationRequest = result.Value;
     Console.WriteLine($"Activation request {activationRequest.RequestId} submitted");
     Console.WriteLine($"Status: {activationRequest.Status}"); // Submitted → UnderReview
-    Console.WriteLine($"Policy: {activationRequest.Policy.PolicySummary}");
+    if (activationRequest.Policy is { } policy)
+    {
+        Console.WriteLine($"Policy: requireHumanReview={policy.RequireHumanReviewForAll}, forbidSelfApproval={policy.ForbidSelfApproval}");
+    }
+    else
+    {
+        Console.WriteLine("Policy: not captured");
+    }
 }
 ```
 
@@ -1622,22 +1638,16 @@ else
 自我审批使用激活请求创建时捕获的策略快照：
 
 ```csharp
-// request.Policy 在 SubmitAsync 时捕获 — 不是实时查询
-if (request.Policy.AllowSelfApproval)
-{
-    // 允许相同 ActorId 的审批
-}
-else if (request.Policy.ForbidSelfApproval)
+// request.Policy 在 SubmitAsync 时捕获 — 不是实时查询；可能未捕获策略
+var policy = request.Policy;
+if (policy is { ForbidSelfApproval: true })
 {
     // 拒绝自我审批 → Block audit action
-    var reason = $"Self-approval forbidden by policy: {request.Policy.PolicySummary}";
+    var reason = $"Self-approval forbidden by policy: requireHumanReview={policy.RequireHumanReviewForAll}, forbidSelfApproval={policy.ForbidSelfApproval}";
 }
 else
 {
-    // 回退策略：使用 snapshot.Owner.DescriptorKind 查询
-    var fallbackPolicy = await _policyProvider.GetPolicyAsync(
-        request.TenantId,
-        request.BindingSnapshot.Owner?.DescriptorKind ?? DescriptorKind.Unknown);
+    // 未禁止自我审批时，继续执行治理决策与人工审批规则
 }
 ```
 

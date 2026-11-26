@@ -188,10 +188,17 @@ public class ToolContractCoverageTests
         legacyOptions.PropertyNamingPolicy.Should().BeNull("the existing root factory preserves PascalCase wire names");
         legacyOptions.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.Never);
 
+        var activationLegacyOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+        activationLegacyOptions.TypeInfoResolver.Should().NotBeNull();
+        activationLegacyOptions.TypeInfoResolver.Should().NotBeOfType<DefaultJsonTypeInfoResolver>();
+        activationLegacyOptions.TypeInfoResolverChain.Should().NotContain(
+            resolver => resolver is DefaultJsonTypeInfoResolver);
+        activationLegacyOptions.PropertyNamingPolicy.Should().BeNull("the activation legacy factory preserves PascalCase wire names");
+        activationLegacyOptions.DefaultIgnoreCondition.Should().Be(JsonIgnoreCondition.Never);
+
         var alignedOptions = new[]
         {
             AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned(),
-            AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
             AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned()
         };
 
@@ -232,35 +239,9 @@ public class ToolContractCoverageTests
     [Fact]
     public void ActivationSerializerOptions_AndContext_UseTheSameWireContract()
     {
-        var request = new SubmitActivationRequestRequest
-        {
-            DraftId = "draft-json",
-            Rationale = null,
-            BindingSnapshot = new ActivationBindingSnapshot
-            {
-                TenantId = "tenant-json",
-                DraftId = "draft-json",
-                DraftVersion = 7,
-                ReviewResultId = "review-json",
-                ReportId = null,
-                PackagePreviewId = "package-json",
-                EvidencePreviewId = "evidence-json",
-                CorrelationId = null,
-                CreatedAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero),
-                Hashes = new BindingHashes
-                {
-                    SourceReviewHash = TestHash("source"),
-                    ReviewManifestHash = TestHash("review"),
-                    PackageManifestHash = TestHash("manifest"),
-                    PackageEvidenceHash = TestHash("evidence"),
-                    PackageEvidenceEnvelopeHash = TestHash("envelope"),
-                    ContractHash = TestHash("contract"),
-                    DefinitionHash = TestHash("definition")
-                }
-            }
-        };
+        var request = CreateActivationRequest();
         var context = AgentControlPlaneActivationJsonSerializerContext.Default;
-        var options = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+        var options = AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned();
 
         var contextJson = JsonSerializer.Serialize(request, context.SubmitActivationRequestRequest);
         var optionsJson = JsonSerializer.Serialize(request, options);
@@ -274,6 +255,56 @@ public class ToolContractCoverageTests
         JsonSerializer.Deserialize<SubmitActivationRequestRequest>(optionsJson, options)
             .Should().BeEquivalentTo(request);
     }
+
+    [Fact]
+    public void ActivationSerializerOptions_PreserveLegacyFactoryPayloads()
+    {
+        const string legacyPayload = """
+            {"DraftId":"d","BindingSnapshot":{"TenantId":"t","DraftId":"d","DraftVersion":7,"ReviewResultId":"r","ReportId":null,"PackagePreviewId":"p","EvidencePreviewId":"e","Hashes":{"SourceReviewHash":{"Value":"s","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ReviewManifestHash":{"Value":"r","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageManifestHash":{"Value":"p","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceHash":{"Value":"e","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"PackageEvidenceEnvelopeHash":{"Value":"x","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"ContractHash":{"Value":"c","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"},"DefinitionHash":{"Value":"d","Algorithm":"SHA-256","AlgorithmVersion":"sha256-canonical-json-v1","ArtifactKind":"Descriptor","DescriptorKind":null,"Scope":"InternalFull","Purpose":"Contract","ContractVersion":"canonical-hash-v1","CanonicalShapeVersion":"schema-contract-hash-v1"}},"CorrelationId":null,"CreatedAt":"2026-01-02T03:04:05+00:00"},"Rationale":null,"GovernanceDecision":null}
+            """;
+        var options = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+
+        var request = JsonSerializer.Deserialize<SubmitActivationRequestRequest>(legacyPayload, options);
+
+        request.Should().NotBeNull();
+        request!.DraftId.Should().Be("d");
+        request.BindingSnapshot.Hashes.DefinitionHash.Value.Should().Be("d");
+        var serialized = JsonSerializer.Serialize(request, options);
+        serialized.Should().Contain("\"DraftId\":\"d\"")
+            .And.Contain("\"Rationale\":null")
+            .And.NotContain("\"draftId\"")
+            .And.NotContain("\"rationale\":null");
+        JsonSerializer.Deserialize<SubmitActivationRequestRequest>(serialized, options)
+            .Should().BeEquivalentTo(request);
+    }
+
+    private static SubmitActivationRequestRequest CreateActivationRequest() => new()
+    {
+        DraftId = "draft-json",
+        Rationale = null,
+        BindingSnapshot = new ActivationBindingSnapshot
+        {
+            TenantId = "tenant-json",
+            DraftId = "draft-json",
+            DraftVersion = 7,
+            ReviewResultId = "review-json",
+            ReportId = null,
+            PackagePreviewId = "package-json",
+            EvidencePreviewId = "evidence-json",
+            CorrelationId = null,
+            CreatedAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero),
+            Hashes = new BindingHashes
+            {
+                SourceReviewHash = TestHash("source"),
+                ReviewManifestHash = TestHash("review"),
+                PackageManifestHash = TestHash("manifest"),
+                PackageEvidenceHash = TestHash("evidence"),
+                PackageEvidenceEnvelopeHash = TestHash("envelope"),
+                ContractHash = TestHash("contract"),
+                DefinitionHash = TestHash("definition")
+            }
+        }
+    };
 
     private static CanonicalHash TestHash(string value) => new()
     {
@@ -294,7 +325,7 @@ public class ToolContractCoverageTests
         {
             (AgentControlPlaneToolJsonSerializerOptions.CreateContextAligned(),
                 AgentControlPlaneToolJsonSerializerContext.Default),
-            (AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
+            (AgentControlPlaneActivationJsonSerializerOptions.CreateContextAligned(),
                 AgentControlPlaneActivationJsonSerializerContext.Default)
         };
         var summary = new MetadataContextPackSummary

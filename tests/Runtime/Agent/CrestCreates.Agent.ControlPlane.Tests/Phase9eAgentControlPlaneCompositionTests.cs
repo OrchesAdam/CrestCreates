@@ -65,21 +65,21 @@ public sealed class Phase9eAgentControlPlaneCompositionTests
     {
         var services = new ServiceCollection();
         services.AddAgentControlPlane();
-        var toolInterfaces = new[]
+        var aliases = new (Type Tool, Type Forwarder)[]
         {
-            typeof(IReadOnlyControlPlaneTools),
-            typeof(IMutationControlPlaneTools),
-            typeof(IActivationControlPlaneTools)
+            (typeof(IReadOnlyControlPlaneTools), typeof(ReadOnlyControlPlaneToolsForwarder)),
+            (typeof(IMutationControlPlaneTools), typeof(MutationControlPlaneToolsForwarder)),
+            (typeof(IActivationControlPlaneTools), typeof(ActivationControlPlaneToolsForwarder))
         };
 
-        foreach (var toolInterface in toolInterfaces)
+        foreach (var (tool, forwarder) in aliases)
         {
             services.Should().ContainSingle(descriptor =>
-                descriptor.ServiceType == toolInterface
+                descriptor.ServiceType == tool
                 && !descriptor.IsKeyedService
-                && descriptor.ImplementationType == typeof(ControlPlaneToolInterfaceForwarder)
+                && descriptor.ImplementationType == forwarder
                 && descriptor.Lifetime == ServiceLifetime.Transient,
-                "the default composition must register an unkeyed forwarding alias for {0}", toolInterface.Name);
+                "the default composition must register an unkeyed forwarding alias for {0}", tool.Name);
         }
     }
 
@@ -136,8 +136,11 @@ public sealed class Phase9eAgentControlPlaneCompositionTests
             InvocationSource = AgentToolInvocationSource.Direct
         };
 
-        provider.GetRequiredService<IReadOnlyControlPlaneTools>().Should().BeSameAs(readOnlyOverride.Object);
-        await provider.GetRequiredService<IReadOnlyControlPlaneTools>().GetTopologySummaryAsync(context);
+        var readOnly = provider.GetRequiredService<IReadOnlyControlPlaneTools>();
+        readOnly.Should().BeSameAs(readOnlyOverride.Object);
+        readOnly.Should().NotBeAssignableTo<IMutationControlPlaneTools>()
+            .And.NotBeAssignableTo<IActivationControlPlaneTools>();
+        await readOnly.GetTopologySummaryAsync(context);
         await provider.GetRequiredService<IMutationControlPlaneTools>().GetDescriptorDraftAsync(context, "draft");
         await provider.GetRequiredService<IActivationControlPlaneTools>().GetActivationRequestStatusAsync(context, "request");
 
@@ -148,6 +151,41 @@ public sealed class Phase9eAgentControlPlaneCompositionTests
         provider.GetRequiredKeyedService<IMutationControlPlaneTools>("keyed-only").Should().BeSameAs(keyedMutation);
         provider.GetRequiredKeyedService<IActivationControlPlaneTools>("keyed-only").Should().BeSameAs(keyedActivation);
         provider.GetRequiredKeyedService<IAgentControlPlaneToolService>("keyed-facade").Should().BeSameAs(keyedFacade);
+    }
+
+    [Fact]
+    public async Task AddAgentControlPlane_Should_NotAllowCastsBetweenForwardingInterfaces()
+    {
+        var services = new ServiceCollection();
+        var facade = new Mock<IAgentControlPlaneToolService>();
+        var mutationOverride = new Mock<IMutationControlPlaneTools>();
+        facade.Setup(service => service.GetDescriptorDraftAsync(
+                It.IsAny<AgentToolInvocationContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentToolResult<AgentDescriptorDraftDto>)null!);
+        mutationOverride.Setup(service => service.GetDescriptorDraftAsync(
+                It.IsAny<AgentToolInvocationContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentToolResult<AgentDescriptorDraftDto>)null!);
+        services.AddSingleton(facade.Object);
+        services.AddSingleton(mutationOverride.Object);
+        services.AddAgentControlPlane();
+
+        using var provider = services.BuildServiceProvider();
+        var readOnly = provider.GetRequiredService<IReadOnlyControlPlaneTools>();
+        var mutation = provider.GetRequiredService<IMutationControlPlaneTools>();
+        var activation = provider.GetRequiredService<IActivationControlPlaneTools>();
+
+        readOnly.Should().NotBeAssignableTo<IMutationControlPlaneTools>()
+            .And.NotBeAssignableTo<IActivationControlPlaneTools>();
+        mutation.Should().NotBeAssignableTo<IReadOnlyControlPlaneTools>()
+            .And.NotBeAssignableTo<IActivationControlPlaneTools>();
+        activation.Should().NotBeAssignableTo<IReadOnlyControlPlaneTools>()
+            .And.NotBeAssignableTo<IMutationControlPlaneTools>();
+        mutation.Should().BeSameAs(mutationOverride.Object);
+
+        var context = TestContext();
+        await mutation.GetDescriptorDraftAsync(context, "draft");
+        mutationOverride.Verify(service => service.GetDescriptorDraftAsync(context, "draft", It.IsAny<CancellationToken>()), Times.Once);
+        facade.Verify(service => service.GetDescriptorDraftAsync(context, "draft", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -226,42 +264,47 @@ public sealed class Phase9eAgentControlPlaneCompositionTests
     public async Task AddAgentControlPlane_Should_KeepTransientFacadePerAliasResolution()
     {
         var services = new ServiceCollection();
-        var facade = new Mock<IAgentControlPlaneToolService>();
-        facade.Setup(service => service.GetTopologySummaryAsync(
-                It.IsAny<AgentToolInvocationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentToolResult<TopologySummaryResult>.Success(new TopologySummaryResult
-            {
-                TotalNodeCount = 0,
-                TotalEdgeCount = 0,
-                NodeCountsByKind = new Dictionary<DescriptorKind, int>(),
-                EdgeCountsByKind = new Dictionary<RelationshipKind, int>(),
-                TopologyDiagnostics = []
-            }));
-        var resolutions = 0;
+        var facades = new List<Mock<IAgentControlPlaneToolService>>();
         services.AddTransient<IAgentControlPlaneToolService>(_ =>
         {
-            resolutions++;
+            var facade = new Mock<IAgentControlPlaneToolService>();
+            facade.As<IDisposable>();
+            facade.Setup(service => service.GetTopologySummaryAsync(
+                    It.IsAny<AgentToolInvocationContext>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(AgentToolResult<TopologySummaryResult>.Success(new TopologySummaryResult
+                {
+                    TotalNodeCount = 0,
+                    TotalEdgeCount = 0,
+                    NodeCountsByKind = new Dictionary<DescriptorKind, int>(),
+                    EdgeCountsByKind = new Dictionary<RelationshipKind, int>(),
+                    TopologyDiagnostics = []
+                }));
+            facades.Add(facade);
             return facade.Object;
         });
         services.AddAgentControlPlane();
 
-        using var provider = services.BuildServiceProvider();
-        var context = new AgentToolInvocationContext
+        var context = TestContext();
+        using (var provider = services.BuildServiceProvider())
         {
-            TenantId = "tenant",
-            ActorId = "actor",
-            ActorKind = AgentToolActorKind.Human,
-            CorrelationId = "correlation",
-            ToolName = AgentToolName.GetTopologySummary,
-            InvocationSource = AgentToolInvocationSource.Direct
-        };
-        var tools = provider.GetRequiredService<IReadOnlyControlPlaneTools>();
+            var firstTools = provider.GetRequiredService<IReadOnlyControlPlaneTools>();
+            var secondTools = provider.GetRequiredService<IReadOnlyControlPlaneTools>();
 
-        await tools.GetTopologySummaryAsync(context);
-        await tools.GetTopologySummaryAsync(context);
+            await firstTools.GetTopologySummaryAsync(context);
+            await firstTools.GetTopologySummaryAsync(context);
+            await secondTools.GetTopologySummaryAsync(context);
 
-        resolutions.Should().Be(1);
-        facade.Verify(service => service.GetTopologySummaryAsync(context, It.IsAny<CancellationToken>()), Times.Exactly(2));
+            facades.Should().HaveCount(2);
+            facades[0].Verify(service => service.GetTopologySummaryAsync(context, It.IsAny<CancellationToken>()), Times.Exactly(2));
+            facades[1].Verify(service => service.GetTopologySummaryAsync(context, It.IsAny<CancellationToken>()), Times.Once);
+            Mock.Get(facades[0].Object).As<IDisposable>().Verify(service => service.Dispose(), Times.Never);
+            Mock.Get(facades[1].Object).As<IDisposable>().Verify(service => service.Dispose(), Times.Never);
+        }
+
+        foreach (var facade in facades)
+        {
+            Mock.Get(facade.Object).As<IDisposable>().Verify(service => service.Dispose(), Times.Once);
+        }
     }
 
     [Fact]
