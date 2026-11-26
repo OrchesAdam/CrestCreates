@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
@@ -11,10 +10,6 @@ public static class AgentControlPlaneToolJsonSerializerOptions
 {
     public static JsonSerializerOptions CreateDefault()
     {
-        return new JsonSerializerOptions
-        {
-            TypeInfoResolver = JsonTypeInfoResolver.Combine(
-                AgentControlPlaneToolJsonSerializerContext.Default)
-        };
+        return new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
     }
 }

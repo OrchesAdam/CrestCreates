@@ -55,12 +55,22 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
         AddActivationReviewConsumer(services);
-        services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
-            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
+        TryAddAgentControlPlaneToolService(services, options);
         AddToolInterfaceAlias<IReadOnlyControlPlaneTools>(services);
         AddToolInterfaceAlias<IMutationControlPlaneTools>(services);
         AddToolInterfaceAlias<IActivationControlPlaneTools>(services);
         return services;
+    }
+
+    private static void TryAddAgentControlPlaneToolService(
+        IServiceCollection services,
+        AgentToolAuthorizationOptions options)
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IAgentControlPlaneToolService) && !descriptor.IsKeyedService))
+            return;
+
+        services.AddSingleton<IAgentControlPlaneToolService>(sp =>
+            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
     }
 
     private static void AddToolInterfaceAlias<TTool>(IServiceCollection services) where TTool : class
@@ -68,7 +78,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         if (services.Any(descriptor => descriptor.ServiceType == typeof(TTool) && !descriptor.IsKeyedService))
             return;
 
-        services.AddSingleton<TTool>(sp => (TTool)sp.GetRequiredService<IAgentControlPlaneToolService>());
+        services.AddTransient(typeof(TTool), typeof(ControlPlaneToolInterfaceForwarder));
     }
 
     /// <summary>

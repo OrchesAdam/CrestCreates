@@ -6,7 +6,7 @@
 
 ### 1.1 前置依赖
 
-read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。`BuildActivationReadinessPreview` 虽按只读 `PackagePreview` 授权，但其接口与结果属于 Activation 契约，序列化必须使用 Activation context。已编译的旧调用方需重新编译并引用新项目；本次拆分不提供类型转发。使用方式：
+read/draft/review/package-preview 的 DTO 和 JSON 序列化上下文位于 `CrestCreates.Agent.ControlPlane.Abstractions`。Activation DTO、完整工具门面和激活 JSON 上下文位于 `CrestCreates.Agent.ControlPlane.Activation.Abstractions`；只需要读取或草稿工具的消费者不要引用激活项目。`BuildActivationReadinessPreviewAsync` 虽按只读 `PackagePreview` 授权，但已从 `IMutationControlPlaneTools` 移到 `IActivationControlPlaneTools`：旧调用方除引用新项目外，还必须把接收者类型改为 `IActivationControlPlaneTools`（或完整 `IAgentControlPlaneToolService`），其结果必须使用 Activation context 序列化。已编译的旧调用方需重新编译；本次拆分不提供类型转发。使用方式：
 
 ```csharp
 // 引入命名空间
@@ -23,12 +23,8 @@ var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 // 完整工具面（含 Activation）：显式引用 Activation.Abstractions
 var activationOptions = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
 
-// 根选项等价于手工构造：
-var rootOptions = new JsonSerializerOptions
-{
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        AgentControlPlaneToolJsonSerializerContext.Default)
-};
+// 根选项等价于复制生成 context 的配置（camelCase、忽略 null）：
+var rootOptions = new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
 ```
 
 ### 1.3 序列化示例
@@ -495,21 +491,17 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 // 方式一：通过工厂获取预配置选项
 var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
 
-// 方式二：手动组合根 context（例如与项目的其他 JsonContext 合并）
-var combinedOptions = new JsonSerializerOptions
-{
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        AgentControlPlaneToolJsonSerializerContext.Default,
-        MyProjectJsonSerializerContext.Default)
-};
+// 方式二：从根 context 配置开始，再与其他 JsonContext 合并
+var combinedOptions = new JsonSerializerOptions(AgentControlPlaneToolJsonSerializerContext.Default.Options);
+combinedOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
+    AgentControlPlaneToolJsonSerializerContext.Default,
+    MyProjectJsonSerializerContext.Default);
 
 // 完整工具面：使用 Activation context，不要从根 context 推断激活契约
-var activationOptions = new JsonSerializerOptions
-{
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        AgentControlPlaneActivationJsonSerializerContext.Default,
-        MyProjectJsonSerializerContext.Default)
-};
+var activationOptions = new JsonSerializerOptions(AgentControlPlaneActivationJsonSerializerContext.Default.Options);
+activationOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(
+    AgentControlPlaneActivationJsonSerializerContext.Default,
+    MyProjectJsonSerializerContext.Default);
 ```
 
 ### 4.2 完整序列化/反序列化示例

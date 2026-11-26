@@ -5,6 +5,9 @@ using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.ContextPack.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -173,15 +176,17 @@ public class ToolContractCoverageTests
     }
 
     [Fact]
-    public void SerializerOptions_ContainOnlyGeneratedResolverChain()
+    public void SerializerOptions_ContainOnlyGeneratedResolverChain_AndMatchContextPolicies()
     {
-        var options = new[]
+        var contexts = new (JsonSerializerOptions Options, JsonSerializerContext Context)[]
         {
-            AgentControlPlaneToolJsonSerializerOptions.CreateDefault(),
-            AgentControlPlaneActivationJsonSerializerOptions.CreateDefault()
+            (AgentControlPlaneToolJsonSerializerOptions.CreateDefault(),
+                AgentControlPlaneToolJsonSerializerContext.Default),
+            (AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
+                AgentControlPlaneActivationJsonSerializerContext.Default)
         };
 
-        foreach (var serializerOptions in options)
+        foreach (var (serializerOptions, context) in contexts)
         {
             serializerOptions.TypeInfoResolver.Should().NotBeNull("options must have a type info resolver");
             serializerOptions.TypeInfoResolver.Should().NotBeOfType<DefaultJsonTypeInfoResolver>(
@@ -189,6 +194,103 @@ public class ToolContractCoverageTests
             serializerOptions.TypeInfoResolverChain.Should().NotContain(
                 resolver => resolver is DefaultJsonTypeInfoResolver,
                 "DefaultJsonTypeInfoResolver must not appear in the resolver chain");
+            serializerOptions.PropertyNamingPolicy.Should().BeSameAs(context.Options.PropertyNamingPolicy);
+            serializerOptions.DefaultIgnoreCondition.Should().Be(context.Options.DefaultIgnoreCondition);
+            serializerOptions.PropertyNameCaseInsensitive.Should().Be(context.Options.PropertyNameCaseInsensitive);
+            serializerOptions.NumberHandling.Should().Be(context.Options.NumberHandling);
+        }
+    }
+
+    [Fact]
+    public void ActivationSerializerOptions_AndContext_UseTheSameWireContract()
+    {
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-json",
+            Rationale = null,
+            BindingSnapshot = new ActivationBindingSnapshot
+            {
+                TenantId = "tenant-json",
+                DraftId = "draft-json",
+                DraftVersion = 7,
+                ReviewResultId = "review-json",
+                ReportId = null,
+                PackagePreviewId = "package-json",
+                EvidencePreviewId = "evidence-json",
+                CorrelationId = null,
+                CreatedAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero),
+                Hashes = new BindingHashes
+                {
+                    SourceReviewHash = TestHash("source"),
+                    ReviewManifestHash = TestHash("review"),
+                    PackageManifestHash = TestHash("manifest"),
+                    PackageEvidenceHash = TestHash("evidence"),
+                    PackageEvidenceEnvelopeHash = TestHash("envelope"),
+                    ContractHash = TestHash("contract"),
+                    DefinitionHash = TestHash("definition")
+                }
+            }
+        };
+        var context = AgentControlPlaneActivationJsonSerializerContext.Default;
+        var options = AgentControlPlaneActivationJsonSerializerOptions.CreateDefault();
+
+        var contextJson = JsonSerializer.Serialize(request, context.SubmitActivationRequestRequest);
+        var optionsJson = JsonSerializer.Serialize(request, options);
+
+        contextJson.Should().Be(optionsJson);
+        contextJson.Should().Contain("\"draftId\"")
+            .And.NotContain("\"Rationale\"")
+            .And.NotContain("\"rationale\":null");
+        JsonSerializer.Deserialize(contextJson, context.SubmitActivationRequestRequest)
+            .Should().BeEquivalentTo(request);
+        JsonSerializer.Deserialize<SubmitActivationRequestRequest>(optionsJson, options)
+            .Should().BeEquivalentTo(request);
+    }
+
+    private static CanonicalHash TestHash(string value) => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "Descriptor",
+        Scope = "InternalFull",
+        Purpose = "Contract",
+        ContractVersion = "canonical-hash-v1",
+        CanonicalShapeVersion = "schema-contract-hash-v1"
+    };
+
+    [Fact]
+    public void SerializerOptions_AndContexts_PreserveRequiredNullableMembers()
+    {
+        var contexts = new (JsonSerializerOptions Options, JsonSerializerContext Context)[]
+        {
+            (AgentControlPlaneToolJsonSerializerOptions.CreateDefault(),
+                AgentControlPlaneToolJsonSerializerContext.Default),
+            (AgentControlPlaneActivationJsonSerializerOptions.CreateDefault(),
+                AgentControlPlaneActivationJsonSerializerContext.Default)
+        };
+        var summary = new MetadataContextPackSummary
+        {
+            TotalDescriptorCount = 0,
+            DescriptorCountsByKind = new Dictionary<DescriptorKind, int>(),
+            TotalRelationshipCount = 0,
+            RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(),
+            FocusRefs = [],
+            WasTruncated = false,
+            TruncatedAtCount = null,
+            TraversalDepthReached = 0
+        };
+
+        foreach (var (options, context) in contexts)
+        {
+            var contextJson = JsonSerializer.Serialize(summary, typeof(MetadataContextPackSummary), context);
+            var optionsJson = JsonSerializer.Serialize(summary, options);
+
+            optionsJson.Should().Be(contextJson);
+            JsonSerializer.Deserialize(contextJson, typeof(MetadataContextPackSummary), context)
+                .Should().BeEquivalentTo(summary);
+            JsonSerializer.Deserialize<MetadataContextPackSummary>(optionsJson, options)
+                .Should().BeEquivalentTo(summary);
         }
     }
 
